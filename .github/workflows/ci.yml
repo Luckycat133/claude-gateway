@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  shellcheck-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck
+        run: |
+          files=$(git ls-files | grep -E '\.sh$|\.bash$|^bin/claude-gateway$' | grep -v '^antigravity-claude-proxy/')
+          if [ -n "$files" ]; then
+            # SC1007:  CDPATH= cd / VAR= VAR2= one-liner resets are intentional POSIX idioms
+            # SC1090/SC1091: providers and config are sourced at runtime (dynamic paths)
+            # SC2034: provider vars are read by the launcher after sourcing, not in-file
+            # shellcheck disable=SC2086
+            shellcheck --exclude=SC1007,SC1090,SC1091,SC2034 "$files"
+          else
+            echo "No shell scripts found to check."
+          fi
+
+      - name: Run smoke test
+        run: sh test/smoke.sh

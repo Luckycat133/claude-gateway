@@ -2,7 +2,22 @@
 
 All notable changes to this local setup are documented in this file.
 
-## [Unreleased]
+## [0.2.0] - 2026-07-30
+
+### Added
+- bash/zsh shell autocompletion (`completions/claude-gateway.bash` and `.zsh`).
+- Offline smoke test (`test/smoke.sh`).
+- GitHub Actions CI running `shellcheck` + smoke test on push/PR.
+
+### Changed
+- `auth` env mode now reads the token via `printenv` instead of `eval` (no code-injection surface).
+- Gateway `stop` uses `SIGTERM` → wait → `SIGKILL` fallback, with an `lsof` availability guard.
+- Keychain lookups are cached to avoid repeated `security` calls.
+- `cmd_doctor` uses explicit `if/else`; all sourced scripts gained `#!/bin/sh` shebangs.
+
+## [0.1.0] - 2026-07-30
+
+Initial release of the claude-gateway adapter framework.
 
 ### Changed
 

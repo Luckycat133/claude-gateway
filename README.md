@@ -156,3 +156,13 @@ The Antigravity proxy is an unofficial integration. Do not use it with a primary
 - Antigravity gateway logs: `logs/antigravity-proxy.log`.
 - MiniMax 401: confirm the Keychain item holds a China Token Plan key.
 - If an Antigravity Claude model is quota-limited, use `antigravity-gemini` until it resets.
+
+## Version & autocompletion
+
+- Version is tracked in the `VERSION` file. `claude-gateway --version` prints it.
+- Shell autocompletion: source `completions/claude-gateway.bash` (bash) or `completions/claude-gateway.zsh` (zsh) from your shell rc.
+
+## Development
+
+- `sh test/smoke.sh` runs a minimal offline smoke test (no keychain or network required).
+- On push/PR, GitHub Actions runs `shellcheck` on all scripts and the smoke test.

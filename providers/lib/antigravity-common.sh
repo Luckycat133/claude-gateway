@@ -1,3 +1,4 @@
+#!/bin/sh
 # Shared helpers for Antigravity-based providers.
 # Sourced by providers/antigravity-*.sh; not a provider itself.
 
@@ -45,10 +46,22 @@ antigravity_ensure_gateway() {
 
 # POST_STOP hook: stop the node process listening on the gateway port.
 antigravity_stop_gateway() {
-  _pid=$(lsof -t -a -iTCP:"$(antigravity_port)" -sTCP:LISTEN -c node 2>/dev/null)
+  command -v lsof >/dev/null 2>&1 || { echo "lsof not found; cannot determine gateway PID." >&2; return 1; }
+  _pid=$(lsof -t -a -iTCP:"$(antigravity_port)" -sTCP:LISTEN -c node 2>/dev/null | head -n 1)
   if [ -z "$_pid" ]; then
     echo "Antigravity gateway is not running."
     return 0
   fi
-  kill $_pid && echo "Stopped Antigravity gateway (PID $_pid)."
+  kill -TERM "$_pid" 2>/dev/null
+  _i=0
+  while [ "$_i" -lt 20 ]; do
+    kill -0 "$_pid" 2>/dev/null || break
+    sleep 0.5
+    _i=$((_i + 1))
+  done
+  if kill -0 "$_pid" 2>/dev/null; then
+    kill -KILL "$_pid" 2>/dev/null && echo "Force-killed Antigravity gateway (PID $_pid)."
+  else
+    echo "Stopped Antigravity gateway (PID $_pid)."
+  fi
 }

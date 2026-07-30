@@ -1,3 +1,4 @@
+#!/bin/sh
 # claude-gateway local configuration.
 #
 # Copy this file to config.sh and adjust. config.sh is gitignored and must

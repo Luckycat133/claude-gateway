@@ -10,6 +10,7 @@
 #   claude-gateway start <provider>              Run the provider's PRE_START hook only
 #   claude-gateway stop <provider>               Run the provider's POST_STOP hook only
 #   claude-gateway help                          Show this help
+#   claude-gateway --version                     Show version
 #
 # Providers live in providers/<name>.sh and only declare "how to connect".
 # This entry point owns "how to launch safely and portably".
@@ -33,6 +34,11 @@ ROOT_DIR=$(CDPATH= cd -- "$BIN_DIR/.." && pwd)
 PROVIDERS_DIR=$ROOT_DIR/providers
 
 # ---------------------------------------------------------------------------
+# Version (single source of truth: $ROOT_DIR/VERSION)
+# ---------------------------------------------------------------------------
+VERSION=$(cat "$ROOT_DIR/VERSION" 2>/dev/null || printf 'unknown')
+
+# ---------------------------------------------------------------------------
 # Config (optional, gitignored). config.example.sh documents the knobs.
 # ---------------------------------------------------------------------------
 CLAUDE_BIN=${CLAUDE_BIN:-}
@@ -48,7 +54,7 @@ die() { printf 'claude-gateway: %s\n' "$*" >&2; exit 1; }
 info() { printf '%s\n' "$*"; }
 
 usage() {
-  sed -n '2,15p' "$SELF" | sed 's/^# \{0,1\}//'
+  sed -n '2,16p' "$SELF" | sed 's/^# \{0,1\}//'
 }
 
 # ---------------------------------------------------------------------------
@@ -88,15 +94,28 @@ load_provider() {
 # ---------------------------------------------------------------------------
 # Auth. The secret only ever lives in AUTH_TOKEN inside this process.
 # ---------------------------------------------------------------------------
+# Keychain availability cache (disk-backed): avoids repeating `security` lookups.
+_kc_cache_dir() { printf '%s/.kc-cache' "${LOG_DIR:-$ROOT_DIR/logs}"; }
+_kc_state() {
+  _d=$(_kc_cache_dir)
+  _f="$_d/$1"
+  [ -f "$_f" ] && cat "$_f" 2>/dev/null
+  return 0
+}
+_kc_set_state() {
+  mkdir -p "$(_kc_cache_dir)" 2>/dev/null
+  printf '%s' "$2" > "$(_kc_cache_dir)/$1" 2>/dev/null
+}
+
 resolve_auth() {
   AUTH_TOKEN=
   case $AUTH_MODE in
     keychain)
-      AUTH_TOKEN=$(security find-generic-password -a "$USER" -s "$AUTH_REFERENCE" -w 2>/dev/null) ||
-        die "keychain item '$AUTH_REFERENCE' not found (provider '$PROVIDER_NAME')"
+      AUTH_TOKEN=$(security find-generic-password -a "$USER" -s "$AUTH_REFERENCE" -w 2>/dev/null)
+      [ -n "$AUTH_TOKEN" ] || die "keychain item '$AUTH_REFERENCE' not found (provider '$PROVIDER_NAME')"
       ;;
     env)
-      eval "AUTH_TOKEN=\${$AUTH_REFERENCE:-}"
+      AUTH_TOKEN=$(printenv "$AUTH_REFERENCE" 2>/dev/null)
       [ -n "$AUTH_TOKEN" ] || die "environment variable '$AUTH_REFERENCE' is empty (provider '$PROVIDER_NAME')"
       ;;
     command)
@@ -119,9 +138,19 @@ resolve_auth() {
 check_auth() {
   case $AUTH_MODE in
     keychain)
-      security find-generic-password -a "$USER" -s "$AUTH_REFERENCE" >/dev/null 2>&1 ;;
+      _st=$(_kc_state "$AUTH_REFERENCE")
+      if [ -z "$_st" ]; then
+        if security find-generic-password -a "$USER" -s "$AUTH_REFERENCE" >/dev/null 2>&1; then
+          _st=ok
+        else
+          _st=missing
+        fi
+        _kc_set_state "$AUTH_REFERENCE" "$_st"
+      fi
+      [ "$_st" = ok ]
+      ;;
     env)
-      eval "_v=\${$AUTH_REFERENCE:-}"; [ -n "$_v" ] ;;
+      _v=$(printenv "$AUTH_REFERENCE" 2>/dev/null); [ -n "$_v" ] ;;
     command)
       _v=$(eval "$AUTH_REFERENCE" 2>/dev/null) && [ -n "$_v" ] ;;
     static|none)
@@ -247,8 +276,16 @@ cmd_doctor() {
     info "note  no config.sh (using defaults; copy config.example.sh if needed)"
   fi
 
-  command -v curl >/dev/null 2>&1 && info "ok    curl available" || { info "FAIL  curl missing"; _fail=1; }
-  command -v security >/dev/null 2>&1 && info "ok    macOS keychain (security) available" || info "note  'security' missing (keychain providers unavailable)"
+  if command -v curl >/dev/null 2>&1; then
+    info "ok    curl available"
+  else
+    info "FAIL  curl missing"; _fail=1
+  fi
+  if command -v security >/dev/null 2>&1; then
+    info "ok    macOS keychain (security) available"
+  else
+    info "note  'security' missing (keychain providers unavailable)"
+  fi
 
   info ""
   if [ -n "${1:-}" ]; then
@@ -278,6 +315,7 @@ cmd=$1; shift
 
 case $cmd in
   help|-h|--help) usage ;;
+  version|-V|--version) info "claude-gateway $VERSION"; exit 0 ;;
   list)           cmd_list ;;
   status)         cmd_status "${1:-}" ;;
   doctor)         cmd_doctor "${1:-}" ;;

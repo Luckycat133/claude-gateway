@@ -1,3 +1,4 @@
+#!/bin/sh
 # Provider: MiniMax Token Plan (China Anthropic-compatible endpoint).
 PROVIDER_NAME="minimax"
 PROVIDER_DESC="MiniMax M3 via the China Anthropic-compatible endpoint"

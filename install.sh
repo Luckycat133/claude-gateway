@@ -3,6 +3,7 @@
 set -u
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+VERSION=$(cat "$ROOT_DIR/VERSION" 2>/dev/null || echo "unknown")
 INSTALL_DIR=${INSTALL_DIR:-$HOME/.local/bin}
 
 mkdir -p "$INSTALL_DIR"
@@ -15,6 +16,7 @@ if [ ! -f "$ROOT_DIR/config.sh" ]; then
 fi
 
 echo "Installed: $INSTALL_DIR/claude-gateway -> $ROOT_DIR/bin/claude-gateway"
+echo "claude-gateway $VERSION"
 
 case :$PATH: in
   *:"$INSTALL_DIR":*) ;;
@@ -22,3 +24,4 @@ case :$PATH: in
 esac
 
 echo "Try: claude-gateway list"
+echo "Optional: enable shell autocompletion - see README (completions/)."
