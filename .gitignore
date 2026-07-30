@@ -1,0 +1,5 @@
+logs/
+config.sh
+antigravity-claude-proxy/
+.workbuddy/
+.DS_Store

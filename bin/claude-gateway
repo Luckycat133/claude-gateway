@@ -1,0 +1,288 @@
+#!/bin/sh
+# claude-gateway - unified launcher for Claude Code against multiple providers.
+#
+# Usage:
+#   claude-gateway <provider> [claude args...]   Launch Claude Code via a provider
+#   claude-gateway run <provider> [args...]      Same as above, explicit form
+#   claude-gateway list                          List available providers
+#   claude-gateway status [provider]             Show auth/health status
+#   claude-gateway doctor [provider]             Run environment diagnostics
+#   claude-gateway start <provider>              Run the provider's PRE_START hook only
+#   claude-gateway stop <provider>               Run the provider's POST_STOP hook only
+#   claude-gateway help                          Show this help
+#
+# Providers live in providers/<name>.sh and only declare "how to connect".
+# This entry point owns "how to launch safely and portably".
+
+set -u
+
+# ---------------------------------------------------------------------------
+# Locate ourselves (follow symlinks so a ~/.local/bin link still finds ROOT_DIR)
+# ---------------------------------------------------------------------------
+SELF=$0
+while [ -h "$SELF" ]; do
+  self_dir=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
+  link=$(readlink "$SELF")
+  case $link in
+    /*) SELF=$link ;;
+    *)  SELF=$self_dir/$link ;;
+  esac
+done
+BIN_DIR=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
+ROOT_DIR=$(CDPATH= cd -- "$BIN_DIR/.." && pwd)
+PROVIDERS_DIR=$ROOT_DIR/providers
+
+# ---------------------------------------------------------------------------
+# Config (optional, gitignored). config.example.sh documents the knobs.
+# ---------------------------------------------------------------------------
+CLAUDE_BIN=${CLAUDE_BIN:-}
+LOG_DIR=${LOG_DIR:-$ROOT_DIR/logs}
+if [ -f "$ROOT_DIR/config.sh" ]; then
+  . "$ROOT_DIR/config.sh"
+fi
+if [ -z "$CLAUDE_BIN" ]; then
+  CLAUDE_BIN=$(command -v claude 2>/dev/null || true)
+fi
+
+die() { printf 'claude-gateway: %s\n' "$*" >&2; exit 1; }
+info() { printf '%s\n' "$*"; }
+
+usage() {
+  sed -n '2,15p' "$SELF" | sed 's/^# \{0,1\}//'
+}
+
+# ---------------------------------------------------------------------------
+# Provider loading
+# ---------------------------------------------------------------------------
+provider_file() { printf '%s/%s.sh' "$PROVIDERS_DIR" "$1"; }
+
+provider_names() {
+  for f in "$PROVIDERS_DIR"/*.sh; do
+    [ -f "$f" ] || continue
+    basename "$f" .sh
+  done
+}
+
+load_provider() {
+  _name=$1
+  _file=$(provider_file "$_name")
+  [ -f "$_file" ] || die "unknown provider '$_name' (try: claude-gateway list)"
+
+  # Reset the provider contract before sourcing.
+  PROVIDER_NAME= PROVIDER_DESC= BASE_URL= MODEL=
+  MODEL_OPUS= MODEL_SONNET= MODEL_HAIKU= MODEL_SUBAGENT=
+  CONTEXT_TOKENS= AUTH_MODE=none AUTH_REFERENCE=
+  EXTRA_ENV= PRE_START= POST_STOP= HEALTH_CHECK_URL=
+
+  . "$_file"
+
+  PROVIDER_NAME=${PROVIDER_NAME:-$_name}
+  [ -n "$BASE_URL" ] || die "provider '$_name': BASE_URL is required"
+  [ -n "$MODEL" ]    || die "provider '$_name': MODEL is required"
+  MODEL_OPUS=${MODEL_OPUS:-$MODEL}
+  MODEL_SONNET=${MODEL_SONNET:-$MODEL}
+  MODEL_HAIKU=${MODEL_HAIKU:-$MODEL}
+  MODEL_SUBAGENT=${MODEL_SUBAGENT:-$MODEL_HAIKU}
+}
+
+# ---------------------------------------------------------------------------
+# Auth. The secret only ever lives in AUTH_TOKEN inside this process.
+# ---------------------------------------------------------------------------
+resolve_auth() {
+  AUTH_TOKEN=
+  case $AUTH_MODE in
+    keychain)
+      AUTH_TOKEN=$(security find-generic-password -a "$USER" -s "$AUTH_REFERENCE" -w 2>/dev/null) ||
+        die "keychain item '$AUTH_REFERENCE' not found (provider '$PROVIDER_NAME')"
+      ;;
+    env)
+      eval "AUTH_TOKEN=\${$AUTH_REFERENCE:-}"
+      [ -n "$AUTH_TOKEN" ] || die "environment variable '$AUTH_REFERENCE' is empty (provider '$PROVIDER_NAME')"
+      ;;
+    command)
+      AUTH_TOKEN=$(eval "$AUTH_REFERENCE") ||
+        die "auth command failed (provider '$PROVIDER_NAME')"
+      [ -n "$AUTH_TOKEN" ] || die "auth command returned empty output (provider '$PROVIDER_NAME')"
+      ;;
+    static)
+      AUTH_TOKEN=$AUTH_REFERENCE
+      ;;
+    none)
+      ;;
+    *)
+      die "provider '$PROVIDER_NAME': unsupported AUTH_MODE '$AUTH_MODE'"
+      ;;
+  esac
+}
+
+# Non-destructive availability check used by status/doctor (never prints secrets).
+check_auth() {
+  case $AUTH_MODE in
+    keychain)
+      security find-generic-password -a "$USER" -s "$AUTH_REFERENCE" >/dev/null 2>&1 ;;
+    env)
+      eval "_v=\${$AUTH_REFERENCE:-}"; [ -n "$_v" ] ;;
+    command)
+      _v=$(eval "$AUTH_REFERENCE" 2>/dev/null) && [ -n "$_v" ] ;;
+    static|none)
+      true ;;
+    *)
+      false ;;
+  esac
+}
+
+check_health() {
+  [ -n "$HEALTH_CHECK_URL" ] || return 2
+  curl -fsS --max-time 3 "$HEALTH_CHECK_URL" >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
+# Hooks
+# ---------------------------------------------------------------------------
+run_pre_start() {
+  [ -n "$PRE_START" ] || return 0
+  eval "$PRE_START" || die "PRE_START hook failed for '$PROVIDER_NAME'"
+}
+
+run_post_stop() {
+  [ -n "$POST_STOP" ] || { info "provider '$PROVIDER_NAME' has no POST_STOP hook."; return 0; }
+  eval "$POST_STOP"
+}
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+cmd_run() {
+  _p=$1; shift
+  load_provider "$_p"
+  run_pre_start
+  resolve_auth
+
+  [ -n "$CLAUDE_BIN" ] || die "claude binary not found; set CLAUDE_BIN in config.sh"
+  [ -x "$CLAUDE_BIN" ] || die "claude binary is not executable: $CLAUDE_BIN"
+
+  # Build "env -i KEY=VAL ... claude args..." via positional parameters so
+  # values with spaces survive. Everything is prepended in front of "$@".
+  set -- "$CLAUDE_BIN" "$@"
+
+  if [ -n "$EXTRA_ENV" ]; then
+    _old_ifs=$IFS
+    IFS='
+'
+    for _pair in $EXTRA_ENV; do
+      [ -n "$_pair" ] && set -- "$_pair" "$@"
+    done
+    IFS=$_old_ifs
+  fi
+
+  # Model aliases; caller may override any of them per session.
+  set -- "CLAUDE_CODE_SUBAGENT_MODEL=${CLAUDE_CODE_SUBAGENT_MODEL:-$MODEL_SUBAGENT}" "$@"
+  set -- "ANTHROPIC_DEFAULT_HAIKU_MODEL=${ANTHROPIC_DEFAULT_HAIKU_MODEL:-$MODEL_HAIKU}" "$@"
+  set -- "ANTHROPIC_DEFAULT_SONNET_MODEL=${ANTHROPIC_DEFAULT_SONNET_MODEL:-$MODEL_SONNET}" "$@"
+  set -- "ANTHROPIC_DEFAULT_OPUS_MODEL=${ANTHROPIC_DEFAULT_OPUS_MODEL:-$MODEL_OPUS}" "$@"
+  set -- "ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-$MODEL}" "$@"
+  [ -n "$CONTEXT_TOKENS" ] && set -- "CLAUDE_CODE_MAX_CONTEXT_TOKENS=$CONTEXT_TOKENS" "$@"
+
+  if [ -n "$AUTH_TOKEN" ]; then
+    set -- "ANTHROPIC_API_KEY=$AUTH_TOKEN" "$@"
+    set -- "ANTHROPIC_AUTH_TOKEN=$AUTH_TOKEN" "$@"
+  fi
+  set -- "ANTHROPIC_BASE_URL=$BASE_URL" "$@"
+
+  # Minimal, terminal-safe environment. No shell leftovers (NO_COLOR etc.).
+  set -- "LANG=${LANG:-en_US.UTF-8}" "$@"
+  set -- "COLORTERM=${COLORTERM:-truecolor}" "$@"
+  set -- "TERM=${TERM:-xterm-256color}" "$@"
+  set -- "SHELL=${SHELL:-/bin/zsh}" "$@"
+  set -- "PATH=$PATH" "$@"
+  set -- "USER=$USER" "$@"
+  set -- "HOME=$HOME" "$@"
+
+  exec env -i "$@"
+}
+
+cmd_list() {
+  printf '%-22s %-26s %-11s %s\n' 'PROVIDER' 'DEFAULT MODEL' 'AUTH' 'ENDPOINT'
+  for _n in $(provider_names); do
+    (
+      load_provider "$_n"
+      printf '%-22s %-26s %-11s %s\n' "$_n" "$MODEL" "$AUTH_MODE" "$BASE_URL"
+    )
+  done
+}
+
+status_one() {
+  (
+    load_provider "$1"
+    if check_auth; then _auth=ok; else _auth=MISSING; fi
+    if [ -n "$HEALTH_CHECK_URL" ]; then
+      if check_health; then _health=up; else _health=DOWN; fi
+    else
+      _health='-'
+    fi
+    printf '%-22s auth:%-9s health:%-6s %s\n' "$1" "$_auth" "$_health" "$BASE_URL"
+  )
+}
+
+cmd_status() {
+  if [ -n "${1:-}" ]; then
+    status_one "$1"
+  else
+    for _n in $(provider_names); do status_one "$_n"; done
+  fi
+}
+
+cmd_doctor() {
+  _fail=0
+
+  if [ -n "$CLAUDE_BIN" ] && [ -x "$CLAUDE_BIN" ]; then
+    info "ok    claude binary: $CLAUDE_BIN"
+  else
+    info "FAIL  claude binary not found (set CLAUDE_BIN in config.sh)"; _fail=1
+  fi
+
+  if [ -f "$ROOT_DIR/config.sh" ]; then
+    info "ok    config: $ROOT_DIR/config.sh"
+  else
+    info "note  no config.sh (using defaults; copy config.example.sh if needed)"
+  fi
+
+  command -v curl >/dev/null 2>&1 && info "ok    curl available" || { info "FAIL  curl missing"; _fail=1; }
+  command -v security >/dev/null 2>&1 && info "ok    macOS keychain (security) available" || info "note  'security' missing (keychain providers unavailable)"
+
+  info ""
+  if [ -n "${1:-}" ]; then
+    status_one "$1"
+  else
+    for _n in $(provider_names); do status_one "$_n"; done
+  fi
+  return $_fail
+}
+
+cmd_start() {
+  load_provider "$1"
+  [ -n "$PRE_START" ] || { info "provider '$1' has no PRE_START hook."; return 0; }
+  run_pre_start
+}
+
+cmd_stop() {
+  load_provider "$1"
+  run_post_stop
+}
+
+# ---------------------------------------------------------------------------
+# Dispatch
+# ---------------------------------------------------------------------------
+[ $# -ge 1 ] || { usage; exit 1; }
+cmd=$1; shift
+
+case $cmd in
+  help|-h|--help) usage ;;
+  list)           cmd_list ;;
+  status)         cmd_status "${1:-}" ;;
+  doctor)         cmd_doctor "${1:-}" ;;
+  start)          [ $# -ge 1 ] || die "usage: claude-gateway start <provider>"; cmd_start "$1" ;;
+  stop)           [ $# -ge 1 ] || die "usage: claude-gateway stop <provider>";  cmd_stop "$1" ;;
+  run)            [ $# -ge 1 ] || die "usage: claude-gateway run <provider> [args...]"; cmd_run "$@" ;;
+  *)              cmd_run "$cmd" "$@" ;;
+esac
