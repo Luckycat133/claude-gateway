@@ -22,7 +22,7 @@ jobs:
             # SC1090/SC1091: providers and config are sourced at runtime (dynamic paths)
             # SC2034: provider vars are read by the launcher after sourcing, not in-file
             # shellcheck disable=SC2086
-            shellcheck --exclude=SC1007,SC1090,SC1091,SC2034 "$files"
+            shellcheck --exclude=SC1007,SC1090,SC1091,SC2034 $files
           else
             echo "No shell scripts found to check."
           fi
