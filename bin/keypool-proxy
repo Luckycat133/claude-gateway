@@ -1,0 +1,187 @@
+#!/usr/bin/env node
+// keypool-proxy: a tiny, dependency-free local proxy that fronts an
+// Anthropic-compatible endpoint and rotates through a pool of API keys.
+//
+// Why this exists: claude-gateway launches Claude Code with a single
+// ANTHROPIC_API_KEY and has no visibility into the per-request HTTP errors
+// (429 / quota) that happen inside the Claude Code process. By pointing
+// ANTHROPIC_BASE_URL at this proxy, key rotation becomes transparent and
+// mid-session: when one key is rate-limited / quota-exhausted (HTTP 429) or
+// rejected (401), the proxy swaps to the next key and retries the request.
+//
+// Env contract (all required except KEYPOOL_TARGETS_MODEL usage):
+//   KEYPOOL_PORT      port to listen on (127.0.0.1 only)
+//   KEYPOOL_KEYS      space-separated list of API keys
+//   KEYPOOL_TARGETS   ";"-separated entries, each "BASE_URL" or "BASE_URL|MODEL"
+//                     e.g. "https://api.minimaxi.com/anthropic;https://x/anthropic|coding"
+//   KEYPOOL_MAX_RETRY max attempts before giving up (default: keys*targets)
+//
+// Attempt ordering is: for each target, try every key. So all keys on the
+// first surface are exhausted before falling through to the next surface.
+
+'use strict';
+const http = require('http');
+const https = require('https');
+const { URL } = require('url');
+
+function fail(msg) {
+  process.stderr.write('keypool-proxy: ' + msg + '\n');
+  process.exit(1);
+}
+
+const PORT = parseInt(process.env.KEYPOOL_PORT, 10);
+if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) fail('KEYPOOL_PORT missing/invalid');
+
+const KEYS = (process.env.KEYPOOL_KEYS || '')
+  .split(/\s+/)
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (KEYS.length === 0) fail('KEYPOOL_KEYS empty');
+
+const rawTargets = (process.env.KEYPOOL_TARGETS || '')
+  .split(';')
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (rawTargets.length === 0) fail('KEYPOOL_TARGETS empty');
+
+function parseTarget(spec) {
+  const [base, model] = spec.split('|');
+  let u;
+  try {
+    u = new URL(base);
+  } catch (e) {
+    fail('bad target URL: ' + base);
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') fail('only http/https targets: ' + base);
+  return {
+    protocol: u.protocol,
+    host: u.hostname,
+    port: u.port || (u.protocol === 'https:' ? 443 : 80),
+    pathBase: u.pathname.replace(/\/+$/, ''), // strip trailing slash
+    model: model || '',
+  };
+}
+
+const TARGETS = rawTargets.map(parseTarget);
+
+// Flat attempt list: for each target, every key.
+const ATTEMPTS = [];
+for (let t = 0; t < TARGETS.length; t++) {
+  for (let k = 0; k < KEYS.length; k++) {
+    ATTEMPTS.push({ t, k });
+  }
+}
+
+const MAX_RETRY = process.env.KEYPOOL_MAX_RETRY
+  ? parseInt(process.env.KEYPOOL_MAX_RETRY, 10)
+  : ATTEMPTS.length;
+if (!MAX_RETRY || MAX_RETRY < 1) fail('KEYPOOL_MAX_RETRY invalid');
+
+// Decrement on transient auth/quota failures.
+let remaining = MAX_RETRY;
+
+function log(msg) {
+  process.stderr.write('keypool-proxy: ' + msg + '\n');
+}
+
+const server = http.createServer((clientReq, clientRes) => {
+  const chunks = [];
+  let size = 0;
+  clientReq.on('data', (c) => {
+    chunks.push(c);
+    size += c.length;
+  });
+  clientReq.on('end', () => {
+    const body = Buffer.concat(chunks, size);
+    attempt(0, clientReq, clientRes, body);
+  });
+  clientReq.on('error', (e) => {
+    log('client req error: ' + e.message);
+    if (!clientRes.headersSent) clientRes.writeHead(400).end('client error');
+  });
+});
+
+function attempt(i, clientReq, clientRes, body) {
+  if (i >= ATTEMPTS.length || remaining <= 0) {
+    clientRes.writeHead(502, { 'content-type': 'application/json' });
+    clientRes.end(JSON.stringify({ error: { type: 'keypool_exhausted', message: 'all keys/retries exhausted' } }));
+    return;
+  }
+  const { t, k } = ATTEMPTS[i];
+  const target = TARGETS[t];
+  const key = KEYS[k];
+
+  const headers = {};
+  for (const [h, v] of Object.entries(clientReq.headers)) {
+    const lh = h.toLowerCase();
+    if (lh === 'host' || lh === 'authorization' || lh === 'x-api-key' || lh === 'connection' || lh === 'proxy-connection') continue;
+    headers[h] = v;
+  }
+  headers['x-api-key'] = key;
+  headers['authorization'] = 'Bearer ' + key;
+
+  const path = target.pathBase + (clientReq.url || '/');
+  const options = {
+    protocol: target.protocol,
+    host: target.host,
+    port: target.port,
+    method: clientReq.method,
+    path: path,
+    headers: headers,
+  };
+
+  const transport = target.protocol === 'https:' ? https : http;
+  const upstream = transport.request(options, (upRes) => {
+    const status = upRes.statusCode;
+    const transient = status === 429 || status === 401;
+    if (!transient) {
+      // Success or non-retryable error: pipe straight through.
+      if (!clientRes.headersSent) clientRes.writeHead(status, upRes.headers);
+      upRes.pipe(clientRes);
+      return;
+    }
+    // Transient (quota / auth): read body, then rotate to next key.
+    const buf = [];
+    upRes.on('data', (c) => buf.push(c));
+    upRes.on('end', () => {
+      remaining -= 1;
+      if (remaining > 0 && i + 1 < ATTEMPTS.length) {
+        log('key ' + k + ' on target ' + t + ' got ' + status + ' -> rotating (remaining=' + remaining + ')');
+        attempt(i + 1, clientReq, clientRes, body);
+      } else {
+        log('key ' + k + ' on target ' + t + ' got ' + status + ' -> exhausted');
+        if (!clientRes.headersSent) clientRes.writeHead(status, upRes.headers);
+        clientRes.end(Buffer.concat(buf));
+      }
+    });
+  });
+
+  upstream.on('error', (e) => {
+    log('upstream error (target ' + t + ', key ' + k + '): ' + e.message);
+    remaining -= 1;
+    if (remaining > 0 && i + 1 < ATTEMPTS.length) {
+      attempt(i + 1, clientReq, clientRes, body);
+    } else {
+      clientRes.writeHead(502, { 'content-type': 'application/json' });
+      clientRes.end(JSON.stringify({ error: { type: 'keypool_upstream_error', message: e.message } }));
+    }
+  });
+
+  if (body && body.length) upstream.write(body);
+  upstream.end();
+}
+
+server.listen(PORT, '127.0.0.1', () => {
+  const actual = server.address().port;
+  // Report the bound port (esp. when PORT=0) so the gateway can wire ANTHROPIC_BASE_URL.
+  process.stdout.write('KEYPOOL_LISTENING_PORT=' + actual + '\n');
+  log('listening on 127.0.0.1:' + actual + ' | keys=' + KEYS.length + ' targets=' + TARGETS.length + ' attempts=' + ATTEMPTS.length);
+});
+
+// Best-effort cleanup on exit.
+function shutdown() {
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 500).unref();
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

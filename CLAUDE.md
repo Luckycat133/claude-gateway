@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. **Configuration & Provider Contracts**: Sourcing `config.sh` (gitignored local overrides) followed by `providers/<name>.sh`. Providers set declarative variables:
    - `BASE_URL`, `MODEL`, `CONTEXT_TOKENS`
    - Model aliases: `MODEL_OPUS`, `MODEL_SONNET`, `MODEL_HAIKU`, `MODEL_SUBAGENT`
-   - `AUTH_MODE`: `keychain`, `env`, `command`, `static`, or `none`
+   - `AUTH_MODE`: `keychain`, `env`, `command`, `static`, `none`, or `keypool`
    - `AUTH_REFERENCE`: Keychain service name, environment variable name, or command
    - Lifecycle hooks: `PRE_START`, `POST_STOP`, `HEALTH_CHECK_URL`
 3. **Lifecycle Hooks**: `PRE_START` hook runs prior to launch (e.g. `antigravity_ensure_gateway` auto-starts the local proxy and polls `/health`).
@@ -30,7 +30,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `bin/claude-gateway`: Core entry point owning launcher execution, auth lookup, and environment isolation.
 - `bin/claude-*`: Compatibility launchers delegating to specific provider commands.
-- `providers/`: Provider definitions (`minimax.sh`, `antigravity-gemini.sh`, `antigravity-claude.sh`).
+- `providers/`: Provider definitions (`minimax.sh`, `antigravity.sh` for Gemini, `antigravity-claude.sh` for Claude, `deepseek.sh`).
 - `providers/lib/`: Shared provider utilities (`antigravity-common.sh` for proxy management).
 - `install.sh`: Creates executable symlinks in `$INSTALL_DIR` (`~/.local/bin`) and copies `config.example.sh` to `config.sh`.
 - `test/smoke.sh`: Hermetic offline smoke test suite.

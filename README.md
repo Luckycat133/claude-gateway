@@ -83,7 +83,7 @@ MODEL_OPUS=""                               # optional; default to MODEL
 MODEL_SONNET=""
 MODEL_HAIKU=""
 MODEL_SUBAGENT=""
-AUTH_MODE="keychain"                        # keychain | env | command | static | none
+AUTH_MODE="keychain"                        # keychain | env | command | static | none | keypool
 AUTH_REFERENCE="my-openrouter-key"          # keychain item / env var name / command
 EXTRA_ENV=""                                # one KEY=VALUE per line
 PRE_START=""                                # optional lifecycle hooks
@@ -100,12 +100,54 @@ HEALTH_CHECK_URL=""                         # used by status/doctor
 | `command` | A command whose stdout is the token | `pass show openrouter` |
 | `static` | The literal (non-secret) token | `local-antigravity-proxy` |
 | `none` | No credential injected | |
+| `keypool` | Space-separated Keychain service names (`AUTH_KEYS`); a local proxy rotates across them on 429/401 | `codex-minimax-token-plan` |
+
+## Key pool & automatic failover
+
+Some providers let you hold several API keys (e.g. multiple MiniMax plans, or a
+pay-as-you-go key plus a Coding Plan). Set `AUTH_MODE="keypool"` and list the
+Keychain service names in `AUTH_KEYS` (space-separated). At launch the gateway
+resolves every key, starts a tiny local proxy (`bin/keypool-proxy`), and points
+Claude Code at the proxy instead of the real endpoint.
+
+The proxy forwards each request and, on a quota/rate-limit error (HTTP **429**)
+or an auth error (**401**), transparently retries with the next key — including
+**mid-session, with no interruption** to the running Claude Code session. When all
+keys on a surface are exhausted it falls through to the next surface (if
+configured), otherwise it returns the upstream error.
+
+### MiniMax example
+
+`providers/minimax.sh` ships in keypool mode:
+
+```sh
+AUTH_MODE="keypool"
+AUTH_KEYS="codex-minimax-token-plan"   # append more Keychain service names here
+# Optional second surface (MiniMax Coding Plan). Its endpoint and supported
+# models differ from the Token Plan; fill these once you have the key(s):
+# CODING_BASE_URL="https://.../anthropic"
+# CODING_KEYS="minimax-coding-1 minimax-coding-2"
+```
+
+Add a key (no shell-history exposure):
+
+```sh
+read -s "K?Paste MiniMax key: "; echo
+security add-generic-password -U -a "$USER" -s "minimax-2" -w "$K"; unset K
+```
+
+then append `minimax-2` to `AUTH_KEYS`. The proxy tries every key on the API
+surface first, then every key on the Coding Plan surface.
+
+Notes:
+- The local proxy listens on `127.0.0.1` only and is torn down when the session ends.
+- `keypool` is provider-agnostic; any provider can opt in via `AUTH_MODE="keypool"` + `AUTH_KEYS`.
 
 ## Providers
 
 ### MiniMax Token Plan
 
-China endpoint `https://api.minimaxi.com/anthropic`, default `MiniMax-M3`, 1,048,576-token input context. The key is read from the Keychain item `codex-minimax-token-plan`. To set or rotate it without shell-history exposure:
+China endpoint `https://api.minimaxi.com/anthropic`, default `MiniMax-M3`, 1,048,576-token input context. It runs in `AUTH_MODE="keypool"`: the Keychain item `codex-minimax-token-plan` is the first entry in `AUTH_KEYS`, and you can add more keys, or a separate Coding Plan surface via `CODING_BASE_URL`/`CODING_KEYS` — see [Key pool & automatic failover](#key-pool--automatic-failover). To set or rotate a key without shell-history exposure:
 
 ```sh
 read -s "MINIMAX_TOKEN_PLAN_KEY?Paste MiniMax Token Plan Key: "

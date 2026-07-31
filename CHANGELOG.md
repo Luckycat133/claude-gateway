@@ -2,6 +2,16 @@
 
 All notable changes to this local setup are documented in this file.
 
+## [0.4.0] - 2026-07-31
+
+### Added
+- Key pool & automatic failover: `AUTH_MODE="keypool"` + `AUTH_KEYS` starts a tiny dependency-free local proxy (`bin/keypool-proxy`) that rotates across multiple API keys on HTTP 429 (quota/rate-limit) or 401 (auth). Switching is transparent mid-session — no Claude Code restart required.
+- `providers/minimax.sh` now ships in keypool mode: the Keychain item `codex-minimax-token-plan` is the first pool entry; add more keys via `AUTH_KEYS`, or a separate Coding Plan surface via optional `CODING_BASE_URL`/`CODING_KEYS`.
+- Provider-agnostic: any provider can opt into keypool by setting `AUTH_MODE="keypool"` + `AUTH_KEYS`.
+
+### Changed
+- In keypool mode, `bin/claude-gateway` launches Claude Code as a child process (instead of `exec`) so the local proxy is torn down cleanly on session exit.
+
 ## [0.3.0] - 2026-07-31
 
 ### Added
