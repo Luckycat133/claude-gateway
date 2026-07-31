@@ -184,8 +184,19 @@ run_post_stop() {
 cmd_run() {
   _p=$1; shift
   load_provider "$_p"
-  run_pre_start
-  resolve_auth
+
+  AUTH_TOKEN=""
+  _bypass_auth=0
+  for _arg in "$@"; do
+    case "$_arg" in
+      --version|-V|--help|-h) _bypass_auth=1 ;;
+    esac
+  done
+
+  if [ "$_bypass_auth" -eq 0 ]; then
+    run_pre_start
+    resolve_auth
+  fi
 
   [ -n "$CLAUDE_BIN" ] || die "claude binary not found; set CLAUDE_BIN in config.sh"
   [ -x "$CLAUDE_BIN" ] || die "claude binary is not executable: $CLAUDE_BIN"

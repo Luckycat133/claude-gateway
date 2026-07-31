@@ -6,11 +6,11 @@ PROVIDER_NAME="antigravity-gemini"
 PROVIDER_DESC="Gemini models via the local Antigravity proxy"
 
 BASE_URL=$(antigravity_base_url)
-MODEL="gemini-3.6-flash-medium"
+MODEL="gemini-3.5-flash-low"
 CONTEXT_TOKENS="1048576"
 
-MODEL_OPUS="gemini-3.6-flash-high"
-MODEL_SONNET="gemini-pro-agent"
+MODEL_OPUS="gemini-3.1-pro-high"
+MODEL_SONNET="gemini-3.5-flash-low"
 MODEL_HAIKU="gemini-3.5-flash-low"
 MODEL_SUBAGENT="gemini-3.5-flash-low"
 

@@ -12,6 +12,7 @@ ai-coding-gateways/
 │   └── claude-gateway             # The only entry point
 ├── providers/
 │   ├── minimax.sh                 # MiniMax M3 (China endpoint)
+│   ├── deepseek.sh                # DeepSeek V4 (Flash/Pro) via /anthropic endpoint
 │   ├── antigravity-gemini.sh      # Gemini via local Antigravity proxy
 │   ├── antigravity-claude.sh      # Claude via local Antigravity proxy
 │   └── lib/antigravity-common.sh  # Shared gateway lifecycle helpers
@@ -27,6 +28,14 @@ ai-coding-gateways/
 ./install.sh          # symlinks claude-gateway into ~/.local/bin, creates config.sh
 ```
 
+For backward compatibility, the installer also provides these equivalent shortcuts:
+
+```sh
+claude-minimax                # claude-gateway minimax
+claude-antigravity            # claude-gateway antigravity-gemini
+claude-antigravity-claude     # claude-gateway antigravity-claude
+```
+
 To use the Antigravity providers, also set up the third-party proxy (see below). MiniMax needs no extra setup beyond the Keychain key.
 
 ## Usage
@@ -36,6 +45,7 @@ claude-gateway list                     # available providers
 claude-gateway minimax                  # Claude Code via MiniMax M3
 claude-gateway antigravity-gemini       # Claude Code via Antigravity Gemini
 claude-gateway antigravity-claude       # Claude Code via Antigravity Claude
+claude-gateway deepseek                  # Claude Code via DeepSeek V4 (Flash/Pro)
 claude-gateway status [provider]        # auth + health at a glance
 claude-gateway doctor [provider]        # environment diagnostics
 claude-gateway start antigravity-gemini # run PRE_START hook only (start gateway)
@@ -102,6 +112,27 @@ echo
 security add-generic-password -U -a "$USER" -s "codex-minimax-token-plan" -w "$MINIMAX_TOKEN_PLAN_KEY"
 unset MINIMAX_TOKEN_PLAN_KEY
 ```
+
+### DeepSeek V4
+
+Anthropic-compatible endpoint `https://api.deepseek.com/anthropic`, default `deepseek-v4-flash`, 1,000,000-token context. The key is read from the Keychain item `deepseek-api-key`. To set or rotate it without shell-history exposure:
+
+```sh
+read -s "DEEPSEEK_KEY?Paste DeepSeek API key: "
+echo
+security add-generic-password -U -a "$USER" -s "deepseek-api-key" -w "$DEEPSEEK_KEY"
+unset DEEPSEEK_KEY
+```
+
+Model mapping (1M context):
+
+| Claude Code selection | DeepSeek model |
+| --- | --- |
+| Default | `deepseek-v4-flash` |
+| `/model opus` | `deepseek-v4-pro` |
+| `/model sonnet`, `/model haiku`, subagents | `deepseek-v4-flash` |
+
+Note: the former `deepseek-chat` / `deepseek-reasoner` names were deprecated on 2026-07-24; use `deepseek-v4-flash` / `deepseek-v4-pro`. Prefer the Keychain setup above. To instead read the key from an environment variable, change the provider to `AUTH_MODE="env"` and `AUTH_REFERENCE="DEEPSEEK_API_KEY"`, then `export DEEPSEEK_API_KEY=...`.
 
 ### Antigravity (Gemini / Claude)
 

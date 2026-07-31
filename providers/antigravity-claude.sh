@@ -6,7 +6,7 @@ PROVIDER_NAME="antigravity-claude"
 PROVIDER_DESC="Claude models via the local Antigravity proxy"
 
 BASE_URL=$(antigravity_base_url)
-MODEL="claude-opus-4-6-thinking"
+MODEL="claude-sonnet-4-6"
 CONTEXT_TOKENS="200000"
 
 MODEL_OPUS="claude-opus-4-6-thinking"

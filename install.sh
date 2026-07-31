@@ -10,12 +10,18 @@ mkdir -p "$INSTALL_DIR"
 ln -sf "$ROOT_DIR/bin/claude-gateway" "$INSTALL_DIR/claude-gateway"
 chmod +x "$ROOT_DIR/bin/claude-gateway"
 
+for shortcut in claude-minimax claude-antigravity claude-antigravity-claude; do
+  chmod +x "$ROOT_DIR/bin/$shortcut"
+  ln -sf "$ROOT_DIR/bin/$shortcut" "$INSTALL_DIR/$shortcut"
+done
+
 if [ ! -f "$ROOT_DIR/config.sh" ]; then
   cp "$ROOT_DIR/config.example.sh" "$ROOT_DIR/config.sh"
   echo "Created config.sh from config.example.sh (edit as needed; it is gitignored)."
 fi
 
 echo "Installed: $INSTALL_DIR/claude-gateway -> $ROOT_DIR/bin/claude-gateway"
+echo "Installed compatibility shortcuts: claude-minimax, claude-antigravity, claude-antigravity-claude"
 echo "claude-gateway $VERSION"
 
 case :$PATH: in
