@@ -34,6 +34,7 @@ For backward compatibility, the installer also provides these equivalent shortcu
 claude-minimax                # claude-gateway minimax
 claude-antigravity            # claude-gateway antigravity
 claude-antigravity-claude     # claude-gateway antigravity-claude
+claude-deepseek              # claude-gateway deepseek
 ```
 
 To use the Antigravity providers, also set up the third-party proxy (see below). MiniMax needs no extra setup beyond the Keychain key.

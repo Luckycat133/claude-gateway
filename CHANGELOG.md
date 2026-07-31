@@ -2,7 +2,7 @@
 
 All notable changes to this local setup are documented in this file.
 
-## [Unreleased]
+## [0.3.0] - 2026-07-31
 
 ### Added
 - `deepseek` provider: DeepSeek V4 (Flash/Pro) via the official Anthropic-compatible endpoint `https://api.deepseek.com/anthropic`. No translation proxy required.
