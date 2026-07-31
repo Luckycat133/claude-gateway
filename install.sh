@@ -10,7 +10,7 @@ mkdir -p "$INSTALL_DIR"
 ln -sf "$ROOT_DIR/bin/claude-gateway" "$INSTALL_DIR/claude-gateway"
 chmod +x "$ROOT_DIR/bin/claude-gateway"
 
-for shortcut in claude-minimax claude-antigravity claude-antigravity-claude; do
+for shortcut in claude-minimax claude-antigravity claude-antigravity-claude claude-deepseek; do
   chmod +x "$ROOT_DIR/bin/$shortcut"
   ln -sf "$ROOT_DIR/bin/$shortcut" "$INSTALL_DIR/$shortcut"
 done
@@ -21,7 +21,7 @@ if [ ! -f "$ROOT_DIR/config.sh" ]; then
 fi
 
 echo "Installed: $INSTALL_DIR/claude-gateway -> $ROOT_DIR/bin/claude-gateway"
-echo "Installed compatibility shortcuts: claude-minimax, claude-antigravity, claude-antigravity-claude"
+echo "Installed compatibility shortcuts: claude-minimax, claude-antigravity, claude-antigravity-claude, claude-deepseek"
 echo "claude-gateway $VERSION"
 
 case :$PATH: in

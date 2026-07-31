@@ -13,7 +13,7 @@ ai-coding-gateways/
 ├── providers/
 │   ├── minimax.sh                 # MiniMax M3 (China endpoint)
 │   ├── deepseek.sh                # DeepSeek V4 (Flash/Pro) via /anthropic endpoint
-│   ├── antigravity-gemini.sh      # Gemini via local Antigravity proxy
+│   ├── antigravity.sh             # Gemini via local Antigravity proxy
 │   ├── antigravity-claude.sh      # Claude via local Antigravity proxy
 │   └── lib/antigravity-common.sh  # Shared gateway lifecycle helpers
 ├── config.example.sh              # Copy to config.sh (gitignored)
@@ -32,7 +32,7 @@ For backward compatibility, the installer also provides these equivalent shortcu
 
 ```sh
 claude-minimax                # claude-gateway minimax
-claude-antigravity            # claude-gateway antigravity-gemini
+claude-antigravity            # claude-gateway antigravity
 claude-antigravity-claude     # claude-gateway antigravity-claude
 ```
 
@@ -43,19 +43,19 @@ To use the Antigravity providers, also set up the third-party proxy (see below).
 ```sh
 claude-gateway list                     # available providers
 claude-gateway minimax                  # Claude Code via MiniMax M3
-claude-gateway antigravity-gemini       # Claude Code via Antigravity Gemini
+claude-gateway antigravity             # Claude Code via Antigravity Gemini
 claude-gateway antigravity-claude       # Claude Code via Antigravity Claude
 claude-gateway deepseek                  # Claude Code via DeepSeek V4 (Flash/Pro)
 claude-gateway status [provider]        # auth + health at a glance
 claude-gateway doctor [provider]        # environment diagnostics
-claude-gateway start antigravity-gemini # run PRE_START hook only (start gateway)
-claude-gateway stop antigravity-gemini  # run POST_STOP hook only (stop gateway)
+claude-gateway start antigravity       # run PRE_START hook only (start gateway)
+claude-gateway stop antigravity        # run POST_STOP hook only (stop gateway)
 ```
 
 Extra arguments after the provider name are passed straight to Claude Code. Per-session model override:
 
 ```sh
-ANTHROPIC_MODEL=gemini-3.6-flash-high claude-gateway antigravity-gemini
+ANTHROPIC_MODEL=gemini-3.6-flash-high claude-gateway antigravity
 ```
 
 ## How it works
@@ -162,8 +162,9 @@ Gemini mapping (1M context):
 | --- | --- |
 | Default | `gemini-3.6-flash-medium` |
 | `/model opus` | `gemini-3.6-flash-high` |
-| `/model sonnet` | `gemini-pro-agent` |
-| `/model haiku` and subagents | `gemini-3.5-flash-low` |
+| `/model sonnet` | `gemini-3.6-flash-medium` |
+| `/model haiku` | `gemini-3.6-flash-low` |
+| subagents | `gemini-3.6-flash-medium` |
 
 Claude mapping (200K context): default and `/model opus` → `claude-opus-4-6-thinking`; `/model sonnet`, `/model haiku`, and subagents → `claude-sonnet-4-6`.
 
@@ -186,7 +187,7 @@ The Antigravity proxy is an unofficial integration. Do not use it with a primary
 - `claude-gateway doctor` checks the Claude binary, config, curl/keychain availability, per-provider auth, and gateway health.
 - Antigravity gateway logs: `logs/antigravity-proxy.log`.
 - MiniMax 401: confirm the Keychain item holds a China Token Plan key.
-- If an Antigravity Claude model is quota-limited, use `antigravity-gemini` until it resets.
+- If an Antigravity Claude model is quota-limited, use `antigravity` until it resets.
 
 ## Version & autocompletion
 

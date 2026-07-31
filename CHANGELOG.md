@@ -6,6 +6,11 @@ All notable changes to this local setup are documented in this file.
 
 ### Added
 - `deepseek` provider: DeepSeek V4 (Flash/Pro) via the official Anthropic-compatible endpoint `https://api.deepseek.com/anthropic`. No translation proxy required.
+- `claude-deepseek` compatibility launcher (joins `claude-minimax`, `claude-antigravity`, `claude-antigravity-claude`).
+
+### Changed
+- Renamed the Gemini provider `antigravity-gemini` → `antigravity` so `claude-antigravity` maps 1:1 to the provider (antigravity = Gemini, `antigravity-claude` = Claude).
+- Gemini model mapping now uses only `gemini-3.6-flash` with low/medium/high tiers: opus→high, sonnet→medium, haiku→low, subagents→medium.
 
 ## [0.2.0] - 2026-07-30
 

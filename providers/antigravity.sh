@@ -2,17 +2,18 @@
 # Provider: Gemini models through the local Antigravity compatibility proxy.
 . "$PROVIDERS_DIR/lib/antigravity-common.sh"
 
-PROVIDER_NAME="antigravity-gemini"
+PROVIDER_NAME="antigravity"
 PROVIDER_DESC="Gemini models via the local Antigravity proxy"
 
 BASE_URL=$(antigravity_base_url)
-MODEL="gemini-3.5-flash-low"
+MODEL="gemini-3.6-flash-medium"
 CONTEXT_TOKENS="1048576"
 
-MODEL_OPUS="gemini-3.1-pro-high"
-MODEL_SONNET="gemini-3.5-flash-low"
-MODEL_HAIKU="gemini-3.5-flash-low"
-MODEL_SUBAGENT="gemini-3.5-flash-low"
+# Gemini 3.6 Flash only; low/medium/high map to the haiku/sonnet/opus tiers.
+MODEL_OPUS="gemini-3.6-flash-high"
+MODEL_SONNET="gemini-3.6-flash-medium"
+MODEL_HAIKU="gemini-3.6-flash-low"
+MODEL_SUBAGENT="gemini-3.6-flash-medium"
 
 # The proxy authenticates upstream itself; the token is a local placeholder.
 AUTH_MODE="static"
