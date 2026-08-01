@@ -12,6 +12,12 @@
 #   crouter rotate <provider>             Replace an existing key in the keypool
 #   crouter remove <provider>             Remove a key from the keypool (and Keychain)
 #   crouter list keys <provider>          List keys registered for a provider
+#   crouter provider show <provider>      Show full provider config (secrets redacted)
+#   crouter config show                   Show effective configuration
+#   crouter config path                   Show path to config.sh
+#   crouter logs list                     List files under the log directory
+#   crouter logs tail <provider>          tail -f the provider's log file
+#   crouter uninstall [-y]                Remove symlinks from $INSTALL_DIR
 #   crouter help                          Show this help
 #   crouter --version                     Show version
 #
@@ -59,7 +65,7 @@ die() { printf 'crouter: %s\n' "$*" >&2; exit 1; }
 info() { printf '%s\n' "$*"; }
 
 usage() {
-  sed -n '2,17p' "$SELF" | sed 's/^# \{0,1\}//'
+  sed -n '2,22p' "$SELF" | sed 's/^# \{0,1\}//'
 }
 
 # ---------------------------------------------------------------------------
@@ -765,6 +771,163 @@ cmd_list_keys() {
 [ $# -ge 1 ] || { usage; exit 1; }
 cmd=$1; shift
 
+# cmd_provider_show <provider>
+#   Print the full provider configuration with secrets redacted.
+cmd_provider_show() {
+  _p=$1
+  load_provider "$_p"
+  _file=$(provider_file "$_p")
+
+  printf 'provider:    %s\n' "$_p"
+  printf 'description: %s\n' "${PROVIDER_DESC:-<none>}"
+  printf 'config file: %s\n' "$_file"
+  printf '\n'
+  printf 'endpoint:    %s\n' "$BASE_URL"
+  printf 'default:     %s\n' "$MODEL"
+  printf 'context:     %s tokens\n' "${CONTEXT_TOKENS:-<unset>}"
+  printf 'effort:      %s\n' "${EFFORT:-<unset>}"
+  printf '\n'
+  printf 'aliases:\n'
+  printf '  opus:      %s\n'    "$MODEL_OPUS"
+  printf '  sonnet:    %s\n'    "$MODEL_SONNET"
+  printf '  haiku:     %s\n'    "$MODEL_HAIKU"
+  printf '  subagent:  %s\n'    "$MODEL_SUBAGENT"
+  printf '\n'
+  printf 'auth:        %s\n' "$AUTH_MODE"
+  case "$AUTH_MODE" in
+    keychain) printf '  reference: %s\n' "$AUTH_REFERENCE" ;;
+    env)      printf '  reference: %s\n' "$AUTH_REFERENCE" ;;
+    command)  printf '  reference: %s\n' "$AUTH_REFERENCE" ;;
+    static)   printf '  reference: %s (literal placeholder)\n' "$AUTH_REFERENCE" ;;
+    none)     ;;
+    keypool)
+      printf '  AUTH_KEYS:      %s\n' "${AUTH_KEYS:-<empty>}"
+      if [ -n "${CODING_BASE_URL:-}" ]; then
+        printf '  CODING_BASE_URL: %s\n' "$CODING_BASE_URL"
+        printf '  CODING_KEYS:     %s\n' "${CODING_KEYS:-<empty>}"
+      fi
+      ;;
+  esac
+  if [ -n "$EXTRA_ENV" ]; then
+    printf '\nextra env:\n'
+    _old_ifs=$IFS; IFS='
+'; for _pair in $EXTRA_ENV; do printf '  %s\n' "$_pair"; done; IFS=$_old_ifs
+  fi
+  if [ -n "$PRE_START" ] || [ -n "$POST_STOP" ] || [ -n "$HEALTH_CHECK_URL" ]; then
+    printf '\nhooks:\n'
+    [ -n "$PRE_START" ]       && printf '  PRE_START:        %s\n' "$PRE_START"
+    [ -n "$POST_STOP" ]       && printf '  POST_STOP:        %s\n' "$POST_STOP"
+    [ -n "$HEALTH_CHECK_URL" ] && printf '  HEALTH_CHECK_URL: %s\n' "$HEALTH_CHECK_URL"
+  fi
+}
+
+# cmd_config_path
+#   Print the absolute path to the active config.sh (or note its absence).
+cmd_config_path() {
+  if [ -f "$ROOT_DIR/config.sh" ]; then
+    printf '%s\n' "$ROOT_DIR/config.sh"
+  else
+    printf 'no config.sh (using built-in defaults; copy %s/config.example.sh to %s/config.sh to override)\n' "$ROOT_DIR" "$ROOT_DIR"
+    return 1
+  fi
+}
+
+# cmd_config_show
+#   Print effective configuration knobs. Lines that look like KEY=VALUE get the
+#   value redacted if its variable name contains KEY/TOKEN/SECRET.
+cmd_config_show() {
+  printf 'ROOT_DIR:      %s\n' "$ROOT_DIR"
+  printf 'VERSION:       %s\n' "$VERSION"
+  printf 'INSTALL_DIR:   %s\n' "${INSTALL_DIR:-$HOME/.local/bin}"
+  printf 'LOG_DIR:       %s\n' "${LOG_DIR:-$ROOT_DIR/logs}"
+  printf 'STATE_DIR:     %s\n' "${STATE_DIR:-$ROOT_DIR/.state}"
+  printf 'CLAUDE_BIN:    %s\n' "${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo '<not found>')}"
+  printf 'NODE_BIN:      %s\n' "${NODE_BIN:-$(command -v node 2>/dev/null || echo '<not found>')}"
+  printf '\n'
+  if [ -f "$ROOT_DIR/config.sh" ]; then
+    printf 'config.sh source (sensitive values redacted):\n'
+    while IFS= read -r _line; do
+      case "$_line" in
+        ''|'#'*) printf '  %s\n' "$_line" ;;
+        *=*)
+          _name=${_line%%=*}
+          case "$_name" in
+            *KEY*|*TOKEN*|*SECRET*|*PASSWORD*)
+              printf '  %s=<redacted>\n' "$_name" ;;
+            *) printf '  %s\n' "$_line" ;;
+          esac
+          ;;
+        *) printf '  %s\n' "$_line" ;;
+      esac
+    done < "$ROOT_DIR/config.sh"
+  else
+    printf 'no config.sh (using built-in defaults)\n'
+  fi
+}
+
+# cmd_logs_list
+#   Print each entry under $LOG_DIR with size and mtime.
+cmd_logs_list() {
+  _ld=${LOG_DIR:-$ROOT_DIR/logs}
+  if [ ! -d "$_ld" ]; then
+    info "no logs directory: $_ld"; return 0
+  fi
+  _any=0
+  for _f in "$_ld"/*; do
+    [ -e "$_f" ] || continue
+    _any=1
+    printf '%10s  %s  %s\n' \
+      "$(ls -l "$_f" | awk '{print $5}')" \
+      "$(ls -l "$_f" | awk '{print $6, $7, $8}')" \
+      "$_f"
+  done
+  if [ "$_any" -eq 0 ]; then info "(no logs yet)"; fi
+}
+
+# cmd_logs_tail <provider>
+#   tail -f the most likely log file for that provider.
+cmd_logs_tail() {
+  _p=$1
+  _ld=${LOG_DIR:-$ROOT_DIR/logs}
+  _found=
+  for _candidate in "$_ld/$_p.log" "$_ld/keypool-$_p.log" "$_ld/$_p-proxy.log"; do
+    if [ -f "$_candidate" ]; then _found=$_candidate; break; fi
+  done
+  if [ -z "$_found" ]; then
+    die "no log file for provider '$_p' under $_ld"
+  fi
+  info "tailing $_found (Ctrl-C to exit)"
+  tail -n 50 -F "$_found"
+}
+
+# cmd_uninstall [-y]
+#   Reverse of install.sh: remove the crouter + claude-<provider> symlinks.
+cmd_uninstall() {
+  _yes=0
+  while [ $# -gt 0 ]; do
+    case $1 in
+      -y|--yes) _yes=1; shift ;;
+      -h|--help) info "usage: crouter uninstall [-y]"; return 0 ;;
+      *) die "uninstall: unknown argument '$1'" ;;
+    esac
+  done
+  _dir=${INSTALL_DIR:-$HOME/.local/bin}
+  _targets="crouter claude-minimax claude-antigravity claude-antigravity-claude claude-deepseek"
+
+  if [ "$_yes" -eq 0 ]; then
+    printf 'remove crouter and provider shortcuts from %s? [y/N] ' "$_dir" >/dev/tty
+    _ans=
+    IFS= read -r _ans </dev/tty || _ans=
+    case "$_ans" in y|Y|yes|YES) ;; *) info "aborted"; return 0 ;; esac
+  fi
+
+  for _t in $_targets; do
+    if [ -L "$_dir/$_t" ] || [ -e "$_dir/$_t" ]; then
+      rm -f "$_dir/$_t" && info "removed $_dir/$_t"
+    fi
+  done
+}
+
 case $cmd in
   help|-h|--help) usage ;;
   version|-V|--version) info "crouter $VERSION"; exit 0 ;;
@@ -783,5 +946,22 @@ case $cmd in
   add)            [ $# -ge 1 ] || die "usage: crouter add <provider> [--surface main|coding] [--name <service>]"; cmd_add_key "$@" ;;
   rotate)         [ $# -ge 1 ] || die "usage: crouter rotate <provider> [--surface main|coding] [--name <service>]"; cmd_rotate_key "$@" ;;
   remove)         [ $# -ge 1 ] || die "usage: crouter remove <provider> --name <service> [--surface main|coding]"; cmd_remove_key "$@" ;;
+  provider)
+    [ $# -ge 1 ] || die "usage: crouter provider show <provider>"
+    cmd_provider_show "$1" ;;
+  config)
+    if [ "${1:-}" = path ]; then
+      cmd_config_path
+    else
+      cmd_config_show
+    fi ;;
+  logs)
+    if [ "${1:-}" = tail ]; then
+      [ $# -ge 2 ] || die "usage: crouter logs tail <provider>"
+      cmd_logs_tail "$2"
+    else
+      cmd_logs_list
+    fi ;;
+  uninstall)       cmd_uninstall "$@" ;;
   *)              cmd_run "$cmd" "$@" ;;
 esac
