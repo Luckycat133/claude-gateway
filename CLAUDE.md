@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Run Smoke Tests**: `./test/smoke.sh`
 - **Install Local Binary & Compatibility Launchers**: `./install.sh`
 - **Lint Shell Scripts**: `shellcheck bin/claude-gateway bin/claude-antigravity bin/claude-antigravity-claude bin/claude-minimax install.sh test/smoke.sh providers/*.sh providers/lib/*.sh`
-- **Run Framework Entry Point**: `./bin/claude-gateway list` (or `status`, `doctor`, `start <provider>`, `stop <provider>`)
+- **Run Framework Entry Point**: `./bin/claude-gateway list` (or `doctor`, `start <provider>`, `stop <provider>`, `add <provider>`, `rotate <provider>`, `remove <provider> --name <service>`, `list keys <provider>`, `forget <provider>`)
 
 ## Architecture & Code Structure
 
@@ -27,11 +27,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 5. **Isolated Execution**: Launches Claude Code via `env -i` with a clean, terminal-safe minimal environment (`HOME`, `PATH`, `TERM`, `LANG`, etc.) and injected `ANTHROPIC_*` environment variables.
 6. **Model Memory**: Remembers the last explicit primary model per provider in `.state/last-model/<provider>` and replays it next launch (precedence: `--model` > `ANTHROPIC_MODEL` env > remembered > provider `MODEL`). Reset via `claude-gateway forget <provider>`. Only the primary model is tracked; in-session `/model` switches inside Claude Code are not persisted.
 
+### Subcommands
+
+Subcommands are flat: `claude-gateway <verb> [args]`. Verbs: `<provider>` (default — launch), `list [keys [provider]]`, `doctor [provider]`, `start <provider>`, `stop <provider>`, `forget <provider>`, `add <provider> [--surface main|coding] [--name <service>]`, `rotate <provider> --name <service> [--surface main|coding]`, `remove <provider> --name <service> [--surface main|coding] [-y]`. The four key-management verbs (`add` / `rotate` / `remove` / `list keys`) operate on a keypool provider's `AUTH_KEYS` / `CODING_KEYS` list and the matching macOS Keychain entries; `add` reads the secret from `/dev/tty` so it never appears in argv or shell history.
+
 ### File Layout
 
-- `bin/claude-gateway`: Core entry point owning launcher execution, auth lookup, and environment isolation.
+- `bin/claude-gateway`: Core entry point owning launcher execution, auth lookup, key-management commands, and environment isolation.
 - `bin/claude-*`: Compatibility launchers delegating to specific provider commands.
 - `providers/`: Provider definitions (`minimax.sh`, `antigravity.sh` for Gemini, `antigravity-claude.sh` for Claude, `deepseek.sh`).
 - `providers/lib/`: Shared provider utilities (`antigravity-common.sh` for proxy management).
 - `install.sh`: Creates executable symlinks in `$INSTALL_DIR` (`~/.local/bin`) and copies `config.example.sh` to `config.sh`.
-- `test/smoke.sh`: Hermetic offline smoke test suite.
+- `test/smoke.sh`: Hermetic offline smoke test suite (with stubs for `security(1)` / `node(1)` so key-management paths run without a real Keychain or Node).

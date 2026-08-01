@@ -155,6 +155,30 @@ Notes:
 - The local proxy listens on `127.0.0.1` only and is torn down when the session ends.
 - `keypool` is provider-agnostic; any provider can opt in via `AUTH_MODE="keypool"` + `AUTH_KEYS`.
 
+## Manage keys from the command line
+
+The gateway ships four subcommands that mutate a keypool provider's
+`AUTH_KEYS` / `CODING_KEYS` list and the corresponding macOS Keychain
+entries, so you never need to hand-edit `providers/<name>.sh` or paste
+keys on the command line (where they'd land in shell history).
+
+```sh
+claude-gateway add <provider>                       # add a key (auto-named)
+claude-gateway add <provider> --name my-key-3       # add with explicit Keychain service name
+claude-gateway add <provider> --surface coding      # add to the CODING_KEYS surface instead
+claude-gateway rotate <provider> --name my-key-1    # replace the secret for an existing key
+claude-gateway remove <provider> --name my-key-2    # remove from the keypool (asks for confirmation)
+claude-gateway remove <provider> --name my-key-2 -y # skip confirmation
+claude-gateway list keys <provider>                 # show what's registered, plus Keychain presence
+```
+
+`add` reads the secret from `/dev/tty` with no echo, so the key never
+appears in `argv` or your shell history. `rotate` requires the name to
+already be listed (use `add` to register a new key). `list keys` prints
+both surfaces of a keypool provider, or a single-key summary for any
+other `AUTH_MODE`. The provider must be in `AUTH_MODE="keypool"` for
+`add` / `rotate` / `remove`; the gateway refuses otherwise.
+
 ## Providers
 
 ### MiniMax Token Plan
