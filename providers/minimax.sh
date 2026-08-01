@@ -14,8 +14,9 @@ MODEL_HAIKU="MiniMax-M3"
 MODEL_SUBAGENT="MiniMax-M3"
 
 # Reasoning effort passed to Claude Code via --effort (low|medium|high|xhigh|max).
-# Effect depends on whether MiniMax's /anthropic endpoint honors the thinking config.
-EFFORT="medium"
+# MiniMax-M3's /anthropic endpoint supports the Anthropic `thinking` block (off by
+# default, enable with adaptive). max = deepest adaptive thinking (largest budget).
+EFFORT="max"
 
 # Key pool resolved from macOS Keychain at launch. Add more service names here
 # (space-separated) and the gateway auto-rotates between them on quota (429) /

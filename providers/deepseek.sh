@@ -21,8 +21,10 @@ MODEL_HAIKU="deepseek-v4-flash"
 MODEL_SUBAGENT="deepseek-v4-flash"
 
 # Reasoning effort passed to Claude Code via --effort (low|medium|high|xhigh|max).
-# Effect depends on whether DeepSeek's /anthropic endpoint honors the thinking config.
-EFFORT="medium"
+# DeepSeek's /anthropic endpoint supports the Anthropic `thinking` block; thinking is
+# ON by default at effort "high", and "max" is the highest it supports. (DeepSeek
+# effort levels are none/low/high/max; Claude Code's max maps to DeepSeek's max.)
+EFFORT="max"
 
 # API key lives in macOS Keychain (service name below). Value is never committed.
 AUTH_MODE="keychain"

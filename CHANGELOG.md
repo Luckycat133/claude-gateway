@@ -2,6 +2,11 @@
 
 All notable changes to this local setup are documented in this file.
 
+## [0.3.4] - 2026-08-01
+
+### Changed
+- Raised `EFFORT` to `max` (highest reasoning strength) for `deepseek` and `minimax`, matching what each API's `/anthropic` endpoint supports. DeepSeek thinking is ON by default at effort `high` and `max` is its ceiling; MiniMax-M3 supports the `thinking` block (`adaptive`) and `max` drives the deepest budget. Override per session with `claude-<provider> --effort <level>`. Verified `--effort max` injection for both with a mock Claude binary.
+
 ## [0.3.3] - 2026-08-01
 
 ### Added
