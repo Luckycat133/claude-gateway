@@ -3,7 +3,7 @@
 # Requires no keychain entry or network access.
 set -u
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-GATEWAY="$ROOT_DIR/bin/claude-gateway"
+GATEWAY="$ROOT_DIR/bin/crouter"
 fail=0
 
 # Create a temporary mock claude binary so the test doesn't depend on a global installation.
@@ -178,7 +178,7 @@ chmod +x "$GATEWAY_SH"
 # from ROOT_DIR, so we use a tiny custom gateway copy rooted at FAKE_ROOT.
 FAKE_ROOT="$MOCK_DIR/repo"
 mkdir -p "$FAKE_ROOT/bin" "$FAKE_ROOT/providers"
-cp "$GATEWAY" "$FAKE_ROOT/bin/claude-gateway"
+cp "$GATEWAY" "$FAKE_ROOT/bin/crouter"
 cp "$FAKE_PROVIDERS_DIR/demo.sh" "$FAKE_ROOT/providers/demo.sh"
 printf '0.4.0\n' > "$FAKE_ROOT/VERSION"
 
@@ -208,14 +208,14 @@ mkdir -p "$FAKE_ROOT/providers/lib"
 cp "$ROOT_DIR/providers/lib/antigravity-common.sh" "$FAKE_ROOT/providers/lib/" 2>/dev/null || true
 
 # Wrapper that runs the fake-rooted gateway with our fake security/node on PATH.
-FAKE_GW="$FAKE_ROOT/bin/claude-gateway"
+FAKE_GW="$FAKE_ROOT/bin/crouter"
 run_fake_gw() {
   PATH="$FAKE_BIN:$PATH" MOCK_DIR="$MOCK_DIR" "$FAKE_GW" "$@"
 }
 
 # Re-source the wrapper each invocation? Just call directly:
 fake_gw() {
-  PATH="$FAKE_BIN:$PATH" MOCK_DIR="$MOCK_DIR" "$FAKE_ROOT/bin/claude-gateway" "$@"
+  PATH="$FAKE_BIN:$PATH" MOCK_DIR="$MOCK_DIR" "$FAKE_ROOT/bin/crouter" "$@"
 }
 
 # happy path: add appends to AUTH_KEYS and stores the secret in our fake kc
