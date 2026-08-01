@@ -1,4 +1,4 @@
-# claude-gateway
+# crouter
 
 A small adapter framework for launching Claude Code against multiple Anthropic-compatible providers from one command. Providers only declare *how to connect*; the single entry point owns *how to launch safely and portably*.
 
@@ -9,7 +9,7 @@ No API key is ever stored in this repository. Keys are resolved at launch time f
 ```text
 ai-coding-gateways/
 ├── bin/
-│   └── claude-gateway             # The only entry point
+│   └── crouter             # The only entry point
 ├── providers/
 │   ├── minimax.sh                 # MiniMax M3 (China endpoint)
 │   ├── deepseek.sh                # DeepSeek V4 (Flash/Pro) via /anthropic endpoint
@@ -17,7 +17,7 @@ ai-coding-gateways/
 │   ├── antigravity-claude.sh      # Claude via local Antigravity proxy
 │   └── lib/antigravity-common.sh  # Shared gateway lifecycle helpers
 ├── config.example.sh              # Copy to config.sh (gitignored)
-├── install.sh                     # Symlink claude-gateway into ~/.local/bin
+├── install.sh                     # Symlink crouter into ~/.local/bin
 ├── antigravity-claude-proxy/      # Third-party proxy checkout; NOT committed
 └── logs/                          # Runtime logs; gitignored
 ```
@@ -25,16 +25,16 @@ ai-coding-gateways/
 ## Install
 
 ```sh
-./install.sh          # symlinks claude-gateway into ~/.local/bin, creates config.sh
+./install.sh          # symlinks crouter into ~/.local/bin, creates config.sh
 ```
 
 For backward compatibility, the installer also provides these equivalent shortcuts:
 
 ```sh
-claude-minimax                # claude-gateway minimax
-claude-antigravity            # claude-gateway antigravity
-claude-antigravity-claude     # claude-gateway antigravity-claude
-claude-deepseek              # claude-gateway deepseek
+claude-minimax                # crouter minimax
+claude-antigravity            # crouter antigravity
+claude-antigravity-claude     # crouter antigravity-claude
+claude-deepseek              # crouter deepseek
 ```
 
 To use the Antigravity providers, also set up the third-party proxy (see below). MiniMax needs no extra setup beyond the Keychain key.
@@ -42,21 +42,21 @@ To use the Antigravity providers, also set up the third-party proxy (see below).
 ## Usage
 
 ```sh
-claude-gateway list                     # available providers
-claude-gateway minimax                  # Claude Code via MiniMax M3
-claude-gateway antigravity             # Claude Code via Antigravity Gemini
-claude-gateway antigravity-claude       # Claude Code via Antigravity Claude
-claude-gateway deepseek                  # Claude Code via DeepSeek V4 (Flash/Pro)
-claude-gateway status [provider]        # auth + health at a glance
-claude-gateway doctor [provider]        # environment diagnostics
-claude-gateway start antigravity       # run PRE_START hook only (start gateway)
-claude-gateway stop antigravity        # run POST_STOP hook only (stop gateway)
+crouter list                     # available providers
+crouter minimax                  # Claude Code via MiniMax M3
+crouter antigravity             # Claude Code via Antigravity Gemini
+crouter antigravity-claude       # Claude Code via Antigravity Claude
+crouter deepseek                  # Claude Code via DeepSeek V4 (Flash/Pro)
+crouter status [provider]        # auth + health at a glance
+crouter doctor [provider]        # environment diagnostics
+crouter start antigravity       # run PRE_START hook only (start gateway)
+crouter stop antigravity        # run POST_STOP hook only (stop gateway)
 ```
 
 Extra arguments after the provider name are passed straight to Claude Code. Per-session model override:
 
 ```sh
-ANTHROPIC_MODEL=gemini-3.6-flash-high claude-gateway antigravity
+ANTHROPIC_MODEL=gemini-3.6-flash-high crouter antigravity
 ```
 
 ### Remember the last model per provider
@@ -65,7 +65,7 @@ The gateway remembers the primary model you pick for each provider and reuses it
 
 - An explicit choice wins and is stored: `--model <id>` (or `ANTHROPIC_MODEL=<id>`).
 - Next launch without `--model` replays the remembered model.
-- Reset a provider's memory: `claude-gateway forget <provider>`.
+- Reset a provider's memory: `crouter forget <provider>`.
 - No memory yet → falls back to the provider's `MODEL`.
 
 Only the **primary** model is remembered. Switching models mid-session with `/model` inside Claude Code is not persisted — the gateway only controls the launch-time default.
@@ -163,13 +163,13 @@ entries, so you never need to hand-edit `providers/<name>.sh` or paste
 keys on the command line (where they'd land in shell history).
 
 ```sh
-claude-gateway add <provider>                       # add a key (auto-named)
-claude-gateway add <provider> --name my-key-3       # add with explicit Keychain service name
-claude-gateway add <provider> --surface coding      # add to the CODING_KEYS surface instead
-claude-gateway rotate <provider> --name my-key-1    # replace the secret for an existing key
-claude-gateway remove <provider> --name my-key-2    # remove from the keypool (asks for confirmation)
-claude-gateway remove <provider> --name my-key-2 -y # skip confirmation
-claude-gateway list keys <provider>                 # show what's registered, plus Keychain presence
+crouter add <provider>                       # add a key (auto-named)
+crouter add <provider> --name my-key-3       # add with explicit Keychain service name
+crouter add <provider> --surface coding      # add to the CODING_KEYS surface instead
+crouter rotate <provider> --name my-key-1    # replace the secret for an existing key
+crouter remove <provider> --name my-key-2    # remove from the keypool (asks for confirmation)
+crouter remove <provider> --name my-key-2 -y # skip confirmation
+crouter list keys <provider>                 # show what's registered, plus Keychain presence
 ```
 
 `add` reads the secret from `/dev/tty` with no echo, so the key never
@@ -233,7 +233,7 @@ ANTIGRAVITY_PORT=18080
 
 The proxy signs in with a Google account on first run — follow its own README for account setup. Keep it updated with `git pull && npm install`.
 
-Launching either Antigravity provider auto-starts the gateway if it is not running (`PRE_START` hook waits for `/health`); `claude-gateway stop <provider>` shuts it down.
+Launching either Antigravity provider auto-starts the gateway if it is not running (`PRE_START` hook waits for `/health`); `crouter stop <provider>` shuts it down.
 
 Gemini mapping (1M context):
 
@@ -263,15 +263,15 @@ The Antigravity proxy is an unofficial integration. Do not use it with a primary
 
 ## Troubleshooting
 
-- `claude-gateway doctor` checks the Claude binary, config, curl/keychain availability, per-provider auth, and gateway health.
+- `crouter doctor` checks the Claude binary, config, curl/keychain availability, per-provider auth, and gateway health.
 - Antigravity gateway logs: `logs/antigravity-proxy.log`.
 - MiniMax 401: confirm the Keychain item holds a China Token Plan key.
 - If an Antigravity Claude model is quota-limited, use `antigravity` until it resets.
 
 ## Version & autocompletion
 
-- Version is tracked in the `VERSION` file. `claude-gateway --version` prints it.
-- Shell autocompletion: source `completions/claude-gateway.bash` (bash) or `completions/claude-gateway.zsh` (zsh) from your shell rc.
+- Version is tracked in the `VERSION` file. `crouter --version` prints it.
+- Shell autocompletion: source `completions/crouter.bash` (bash) or `completions/crouter.zsh` (zsh) from your shell rc.
 
 ## Development
 

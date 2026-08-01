@@ -1,11 +1,11 @@
 #!/bin/sh
-# claude-gateway local configuration.
+# crouter local configuration.
 #
 # Copy this file to config.sh and adjust. config.sh is gitignored and must
 # never contain API keys - keys belong in Keychain / env vars / a command
 # (see AUTH_MODE in providers/*.sh).
 #
-# This file is sourced by bin/claude-gateway after ROOT_DIR is set, so you
+# This file is sourced by bin/crouter after ROOT_DIR is set, so you
 # may reference $ROOT_DIR and $HOME.
 
 # Path to the Claude Code binary. Default: `command -v claude`.

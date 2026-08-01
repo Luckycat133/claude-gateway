@@ -12,4 +12,4 @@ while [ -h "$SELF" ]; do
   esac
 done
 BIN_DIR=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
-exec "$BIN_DIR/claude-gateway" antigravity "$@"
+exec "$BIN_DIR/crouter" antigravity "$@"
