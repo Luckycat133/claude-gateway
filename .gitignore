@@ -1,4 +1,5 @@
 logs/
+.state/
 config.sh
 antigravity-claude-proxy/
 .workbuddy/

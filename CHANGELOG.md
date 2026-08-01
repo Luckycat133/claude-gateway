@@ -2,7 +2,12 @@
 
 All notable changes to this local setup are documented in this file.
 
-## [0.4.0] - 2026-07-31
+## [0.3.2] - 2026-08-01
+
+### Added
+- Remember last-used model per provider: the gateway stores the primary model chosen via `--model` or `ANTHROPIC_MODEL` in `.state/last-model/<provider>` and replays it on the next launch (precedence: `--model` > `ANTHROPIC_MODEL` env > remembered > provider `MODEL`). Reset with `claude-gateway forget <provider>`. Only the primary model is tracked; in-session `/model` switches inside Claude Code are not persisted.
+
+## [0.3.1] - 2026-07-31
 
 ### Added
 - Key pool & automatic failover: `AUTH_MODE="keypool"` + `AUTH_KEYS` starts a tiny dependency-free local proxy (`bin/keypool-proxy`) that rotates across multiple API keys on HTTP 429 (quota/rate-limit) or 401 (auth). Switching is transparent mid-session — no Claude Code restart required.

@@ -9,6 +9,7 @@
 #   claude-gateway doctor [provider]             Run environment diagnostics
 #   claude-gateway start <provider>              Run the provider's PRE_START hook only
 #   claude-gateway stop <provider>               Run the provider's POST_STOP hook only
+#   claude-gateway forget <provider>             Forget the remembered last-used model
 #   claude-gateway help                          Show this help
 #   claude-gateway --version                     Show version
 #
@@ -43,6 +44,7 @@ VERSION=$(cat "$ROOT_DIR/VERSION" 2>/dev/null || printf 'unknown')
 # ---------------------------------------------------------------------------
 CLAUDE_BIN=${CLAUDE_BIN:-}
 LOG_DIR=${LOG_DIR:-$ROOT_DIR/logs}
+STATE_DIR=${STATE_DIR:-$ROOT_DIR/.state}
 if [ -f "$ROOT_DIR/config.sh" ]; then
   . "$ROOT_DIR/config.sh"
 fi
@@ -106,6 +108,25 @@ _kc_state() {
 _kc_set_state() {
   mkdir -p "$(_kc_cache_dir)" 2>/dev/null
   printf '%s' "$2" > "$(_kc_cache_dir)/$1" 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# Last-used model memory (per provider). A provider defaults to the model the
+# user picked last launch instead of the hard-coded MODEL every time. Only the
+# *primary* model is remembered; in-session /model switches happen inside Claude
+# Code and are invisible to the gateway.
+# ---------------------------------------------------------------------------
+_lm_file() { printf '%s/last-model/%s' "${STATE_DIR:-$ROOT_DIR/.state}" "$1"; }
+load_last_model() {
+  _f=$(_lm_file "$1"); [ -f "$_f" ] && cat "$_f" 2>/dev/null; return 0
+}
+save_last_model() {
+  _d="${STATE_DIR:-$ROOT_DIR/.state}/last-model"
+  mkdir -p "$_d" 2>/dev/null
+  printf '%s' "$2" > "$_d/$1" 2>/dev/null
+}
+forget_last_model() {
+  _f=$(_lm_file "$1"); [ -f "$_f" ] && rm -f "$_f"
 }
 
 resolve_auth() {
@@ -242,6 +263,35 @@ cmd_run() {
   _p=$1; shift
   load_provider "$_p"
 
+  # Resolve the primary model with this precedence:
+  #   --model <x>  >  ANTHROPIC_MODEL env  >  remembered model  >  provider MODEL
+  # Any explicit choice is remembered for the next launch. Only the primary
+  # model is tracked; in-session /model switches live inside Claude Code and
+  # are invisible to the gateway.
+  _main_model=""
+  _model_set=0
+  _i=0
+  while [ $_i -lt $# ]; do
+    _i=$((_i + 1))
+    eval "_a=\${$_i}"
+    case "$_a" in
+      --model=*) _main_model=${_a#--model=}; _model_set=1 ;;
+      --model)
+        _i=$((_i + 1))
+        eval "_main_model=\${$_i}"; _model_set=1
+        ;;
+    esac
+  done
+  if [ "$_model_set" -eq 1 ] && [ -n "$_main_model" ]; then
+    save_last_model "$_p" "$_main_model"
+  elif [ -n "${ANTHROPIC_MODEL:-}" ]; then
+    _main_model=$ANTHROPIC_MODEL
+    save_last_model "$_p" "$_main_model"
+  else
+    _main_model=$(load_last_model "$_p")
+    [ -z "$_main_model" ] && _main_model=$MODEL
+  fi
+
   AUTH_TOKEN=""
   _bypass_auth=0
   for _arg in "$@"; do
@@ -281,7 +331,7 @@ cmd_run() {
   set -- "ANTHROPIC_DEFAULT_HAIKU_MODEL=${ANTHROPIC_DEFAULT_HAIKU_MODEL:-$MODEL_HAIKU}" "$@"
   set -- "ANTHROPIC_DEFAULT_SONNET_MODEL=${ANTHROPIC_DEFAULT_SONNET_MODEL:-$MODEL_SONNET}" "$@"
   set -- "ANTHROPIC_DEFAULT_OPUS_MODEL=${ANTHROPIC_DEFAULT_OPUS_MODEL:-$MODEL_OPUS}" "$@"
-  set -- "ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-$MODEL}" "$@"
+  set -- "ANTHROPIC_MODEL=$_main_model" "$@"
   [ -n "$CONTEXT_TOKENS" ] && set -- "CLAUDE_CODE_MAX_CONTEXT_TOKENS=$CONTEXT_TOKENS" "$@"
 
   if [ "${AUTH_MODE:-}" = "keypool" ]; then
@@ -337,6 +387,8 @@ status_one() {
       _health='-'
     fi
     printf '%-22s auth:%-9s health:%-6s %s\n' "$1" "$_auth" "$_health" "$BASE_URL"
+    _lm=$(load_last_model "$1")
+    if [ -n "$_lm" ]; then printf '%-22s last model: %s\n' "" "$_lm"; fi
   )
 }
 
@@ -408,6 +460,7 @@ case $cmd in
   doctor)         cmd_doctor "${1:-}" ;;
   start)          [ $# -ge 1 ] || die "usage: claude-gateway start <provider>"; cmd_start "$1" ;;
   stop)           [ $# -ge 1 ] || die "usage: claude-gateway stop <provider>";  cmd_stop "$1" ;;
+  forget)         [ $# -ge 1 ] || die "usage: claude-gateway forget <provider>"; forget_last_model "$1"; info "forgot last model for provider '$1'" ;;
   run)            [ $# -ge 1 ] || die "usage: claude-gateway run <provider> [args...]"; cmd_run "$@" ;;
   *)              cmd_run "$cmd" "$@" ;;
 esac

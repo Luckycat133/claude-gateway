@@ -59,6 +59,17 @@ Extra arguments after the provider name are passed straight to Claude Code. Per-
 ANTHROPIC_MODEL=gemini-3.6-flash-high claude-gateway antigravity
 ```
 
+### Remember the last model per provider
+
+The gateway remembers the primary model you pick for each provider and reuses it next launch, so you don't re-pass `--model` every time.
+
+- An explicit choice wins and is stored: `--model <id>` (or `ANTHROPIC_MODEL=<id>`).
+- Next launch without `--model` replays the remembered model.
+- Reset a provider's memory: `claude-gateway forget <provider>`.
+- No memory yet → falls back to the provider's `MODEL`.
+
+Only the **primary** model is remembered. Switching models mid-session with `/model` inside Claude Code is not persisted — the gateway only controls the launch-time default.
+
 ## How it works
 
 The entry point:

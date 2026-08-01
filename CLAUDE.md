@@ -25,6 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **Lifecycle Hooks**: `PRE_START` hook runs prior to launch (e.g. `antigravity_ensure_gateway` auto-starts the local proxy and polls `/health`).
 4. **Credential Resolution**: `AUTH_TOKEN` is resolved at launch time without exposing secrets in process environments or disk storage.
 5. **Isolated Execution**: Launches Claude Code via `env -i` with a clean, terminal-safe minimal environment (`HOME`, `PATH`, `TERM`, `LANG`, etc.) and injected `ANTHROPIC_*` environment variables.
+6. **Model Memory**: Remembers the last explicit primary model per provider in `.state/last-model/<provider>` and replays it next launch (precedence: `--model` > `ANTHROPIC_MODEL` env > remembered > provider `MODEL`). Reset via `claude-gateway forget <provider>`. Only the primary model is tracked; in-session `/model` switches inside Claude Code are not persisted.
 
 ### File Layout
 
