@@ -20,6 +20,10 @@ MODEL_SONNET="deepseek-v4-flash"
 MODEL_HAIKU="deepseek-v4-flash"
 MODEL_SUBAGENT="deepseek-v4-flash"
 
+# Reasoning effort passed to Claude Code via --effort (low|medium|high|xhigh|max).
+# Effect depends on whether DeepSeek's /anthropic endpoint honors the thinking config.
+EFFORT="medium"
+
 # API key lives in macOS Keychain (service name below). Value is never committed.
 AUTH_MODE="keychain"
 AUTH_REFERENCE="deepseek-api-key"

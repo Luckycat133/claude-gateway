@@ -15,6 +15,10 @@ MODEL_SONNET="gemini-3.6-flash-medium"
 MODEL_HAIKU="gemini-3.6-flash-low"
 MODEL_SUBAGENT="gemini-3.6-flash-medium"
 
+# Gemini effort is encoded in the model name (gemini-3.6-flash-{low,medium,high}),
+# so we leave Claude Code's --effort unset here to avoid double control.
+EFFORT=""
+
 # The proxy authenticates upstream itself; the token is a local placeholder.
 AUTH_MODE="static"
 AUTH_REFERENCE="local-antigravity-proxy"

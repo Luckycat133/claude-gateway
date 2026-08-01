@@ -2,6 +2,11 @@
 
 All notable changes to this local setup are documented in this file.
 
+## [0.3.3] - 2026-08-01
+
+### Added
+- Reasoning effort control: a provider can set `EFFORT` (`low`|`medium`|`high`|`xhigh`|`max`), which the gateway passes to Claude Code as `--effort`. Override per session with `claude-<provider> --effort <level>`; invalid values are ignored with a warning. Defaults: `medium` for `antigravity-claude`/`deepseek`/`minimax`; unset for `antigravity` (Gemini effort is encoded in the model name, e.g. `gemini-3.6-flash-high`).
+
 ## [0.3.2] - 2026-08-01
 
 ### Added

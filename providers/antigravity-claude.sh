@@ -14,6 +14,9 @@ MODEL_SONNET="claude-sonnet-4-6"
 MODEL_HAIKU="claude-sonnet-4-6"
 MODEL_SUBAGENT="claude-sonnet-4-6"
 
+# Reasoning effort passed to Claude Code via --effort (low|medium|high|xhigh|max).
+EFFORT="medium"
+
 # The proxy authenticates upstream itself; the token is a local placeholder.
 AUTH_MODE="static"
 AUTH_REFERENCE="local-antigravity-proxy"

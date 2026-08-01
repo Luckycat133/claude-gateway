@@ -79,7 +79,7 @@ The entry point:
 3. Runs the provider's optional `PRE_START` hook (for Antigravity this auto-starts the local gateway and waits for `/health`).
 4. Resolves the credential according to `AUTH_MODE` — the secret exists only in the launcher process.
 5. Launches Claude Code with `env -i` and a minimal, terminal-safe environment (`HOME`, `PATH`, locale, terminal capabilities), so stray shell variables such as `NO_COLOR` cannot leak in.
-6. Injects endpoint, default model, model aliases (opus/sonnet/haiku/subagent), context window, and any provider `EXTRA_ENV`.
+6. Injects endpoint, default model, model aliases (opus/sonnet/haiku/subagent), context window, reasoning effort (`--effort`, from the provider `EFFORT` field), and any provider `EXTRA_ENV`.
 
 ## Adding a provider
 
@@ -97,6 +97,7 @@ MODEL_SUBAGENT=""
 AUTH_MODE="keychain"                        # keychain | env | command | static | none | keypool
 AUTH_REFERENCE="my-openrouter-key"          # keychain item / env var name / command
 EXTRA_ENV=""                                # one KEY=VALUE per line
+EFFORT=""                                   # reasoning effort: low|medium|high|xhigh|max (-> claude --effort)
 PRE_START=""                                # optional lifecycle hooks
 POST_STOP=""
 HEALTH_CHECK_URL=""                         # used by status/doctor

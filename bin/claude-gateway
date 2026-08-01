@@ -316,6 +316,23 @@ cmd_run() {
   # values with spaces survive. Everything is prepended in front of "$@".
   set -- "$CLAUDE_BIN" "$@"
 
+  # Reasoning effort (Claude Code --effort). Inject the provider default unless
+  # the user already passed --effort. Valid levels: low|medium|high|xhigh|max.
+  case "${EFFORT:-}" in
+    ""|low|medium|high|xhigh|max) ;;
+    *) info "warn: EFFORT='$EFFORT' is not a valid Claude Code effort level (low|medium|high|xhigh|max); ignoring"; EFFORT="" ;;
+  esac
+  if [ -n "${EFFORT:-}" ]; then
+    _has_effort=0
+    for _arg in "$@"; do
+      case "$_arg" in --effort) _has_effort=1; break ;; esac
+    done
+    if [ "$_has_effort" -eq 0 ]; then
+      _claude_bin="$1"; shift
+      set -- "$_claude_bin" "--effort" "$EFFORT" "$@"
+    fi
+  fi
+
   if [ -n "$EXTRA_ENV" ]; then
     _old_ifs=$IFS
     IFS='

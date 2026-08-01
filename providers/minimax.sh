@@ -13,6 +13,10 @@ MODEL_SONNET="MiniMax-M3"
 MODEL_HAIKU="MiniMax-M3"
 MODEL_SUBAGENT="MiniMax-M3"
 
+# Reasoning effort passed to Claude Code via --effort (low|medium|high|xhigh|max).
+# Effect depends on whether MiniMax's /anthropic endpoint honors the thinking config.
+EFFORT="medium"
+
 # Key pool resolved from macOS Keychain at launch. Add more service names here
 # (space-separated) and the gateway auto-rotates between them on quota (429) /
 # auth (401) errors, mid-session and transparently. Only the names are committed.
