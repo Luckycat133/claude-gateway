@@ -36,10 +36,12 @@ bad() { printf 'FAIL  %s\n' "$1"; fail=1; }
 
 # Legacy command names remain available as local compatibility launchers.
 for legacy in claude-minimax claude-antigravity claude-antigravity-claude; do
-  if "$ROOT_DIR/bin/$legacy" --version 2>/dev/null | grep -qE '[0-9]+\.[0-9]+\.[0-9]+'; then
-    ok "$legacy compatibility launcher forwards --version"
+  _out=$("$ROOT_DIR/bin/$legacy" --version 2>&1)
+  _rc=$?
+  if [ "$_rc" -eq 0 ] && printf '%s\n' "$_out" | grep -qE '[0-9]+\.[0-9]+\.[0-9]+'; then
+    ok "$legacy compatibility launcher forwards --version (exit 0)"
   else
-    bad "$legacy compatibility launcher is unavailable"
+    bad "$legacy compatibility launcher is unavailable (rc=$_rc, output: $_out)"
   fi
 done
 

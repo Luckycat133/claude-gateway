@@ -378,7 +378,7 @@ cmd_run() {
   set -- "USER=$USER" "$@"
   set -- "HOME=$HOME" "$@"
 
-  if [ "${AUTH_MODE:-}" = "keypool" ]; then
+  if [ "${AUTH_MODE:-}" = "keypool" ] && [ "$_bypass_auth" -eq 0 ]; then
     # Run as a child (not exec) so we can reap the proxy on exit.
     env -i "$@" &
     _cg_pid=$!
