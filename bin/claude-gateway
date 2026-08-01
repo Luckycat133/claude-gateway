@@ -3,9 +3,7 @@
 #
 # Usage:
 #   claude-gateway <provider> [claude args...]   Launch Claude Code via a provider
-#   claude-gateway run <provider> [args...]      Same as above, explicit form
 #   claude-gateway list                          List available providers
-#   claude-gateway status [provider]             Show auth/health status
 #   claude-gateway doctor [provider]             Run environment diagnostics
 #   claude-gateway start <provider>              Run the provider's PRE_START hook only
 #   claude-gateway stop <provider>               Run the provider's POST_STOP hook only
@@ -57,7 +55,7 @@ die() { printf 'claude-gateway: %s\n' "$*" >&2; exit 1; }
 info() { printf '%s\n' "$*"; }
 
 usage() {
-  sed -n '2,16p' "$SELF" | sed 's/^# \{0,1\}//'
+  sed -n '2,13p' "$SELF" | sed 's/^# \{0,1\}//'
 }
 
 # ---------------------------------------------------------------------------
@@ -375,13 +373,22 @@ cmd_run() {
     # Run as a child (not exec) so we can reap the proxy on exit.
     env -i "$@" &
     _cg_pid=$!
-    trap 'kill "$KEYPOOL_PID" 2>/dev/null; kill "$_cg_pid" 2>/dev/null' EXIT INT TERM
+    trap '[ -n "${POST_STOP:-}" ] && eval "$POST_STOP"; kill "$KEYPOOL_PID" 2>/dev/null; kill "$_cg_pid" 2>/dev/null' EXIT INT TERM
     wait "$_cg_pid"
     _rc=$?
     kill "$KEYPOOL_PID" 2>/dev/null
     exit "${_rc:-0}"
   fi
-  exec env -i "$@"
+
+  # Run as a child (not exec) so POST_STOP runs on exit and any local proxy
+  # (e.g. Antigravity on 127.0.0.1:18080) is cleaned up instead of leaking.
+  env -i "$@" &
+  _cg_pid=$!
+  trap '[ -n "${POST_STOP:-}" ] && eval "$POST_STOP"; kill "$_cg_pid" 2>/dev/null' EXIT INT TERM
+  wait "$_cg_pid"
+  _rc=$?
+  [ -n "${POST_STOP:-}" ] && eval "$POST_STOP"
+  exit "${_rc:-0}"
 }
 
 cmd_list() {
@@ -407,14 +414,6 @@ status_one() {
     _lm=$(load_last_model "$1")
     if [ -n "$_lm" ]; then printf '%-22s last model: %s\n' "" "$_lm"; fi
   )
-}
-
-cmd_status() {
-  if [ -n "${1:-}" ]; then
-    status_one "$1"
-  else
-    for _n in $(provider_names); do status_one "$_n"; done
-  fi
 }
 
 cmd_doctor() {
@@ -473,11 +472,9 @@ case $cmd in
   help|-h|--help) usage ;;
   version|-V|--version) info "claude-gateway $VERSION"; exit 0 ;;
   list)           cmd_list ;;
-  status)         cmd_status "${1:-}" ;;
   doctor)         cmd_doctor "${1:-}" ;;
   start)          [ $# -ge 1 ] || die "usage: claude-gateway start <provider>"; cmd_start "$1" ;;
   stop)           [ $# -ge 1 ] || die "usage: claude-gateway stop <provider>";  cmd_stop "$1" ;;
   forget)         [ $# -ge 1 ] || die "usage: claude-gateway forget <provider>"; forget_last_model "$1"; info "forgot last model for provider '$1'" ;;
-  run)            [ $# -ge 1 ] || die "usage: claude-gateway run <provider> [args...]"; cmd_run "$@" ;;
   *)              cmd_run "$cmd" "$@" ;;
 esac
