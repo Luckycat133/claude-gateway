@@ -47,10 +47,7 @@ crouter minimax                  # Claude Code via MiniMax M3
 crouter antigravity             # Claude Code via Antigravity Gemini
 crouter antigravity-claude       # Claude Code via Antigravity Claude
 crouter deepseek                  # Claude Code via DeepSeek V4 (Flash/Pro)
-crouter status [provider]        # auth + health at a glance
 crouter doctor [provider]        # environment diagnostics
-crouter start antigravity       # run PRE_START hook only (start gateway)
-crouter stop antigravity        # run POST_STOP hook only (stop gateway)
 ```
 
 Extra arguments after the provider name are passed straight to Claude Code. Per-session model override:
@@ -58,17 +55,6 @@ Extra arguments after the provider name are passed straight to Claude Code. Per-
 ```sh
 ANTHROPIC_MODEL=gemini-3.6-flash-high crouter antigravity
 ```
-
-### Remember the last model per provider
-
-The gateway remembers the primary model you pick for each provider and reuses it next launch, so you don't re-pass `--model` every time.
-
-- An explicit choice wins and is stored: `--model <id>` (or `ANTHROPIC_MODEL=<id>`).
-- Next launch without `--model` replays the remembered model.
-- Reset a provider's memory: `crouter forget <provider>`.
-- No memory yet → falls back to the provider's `MODEL`.
-
-Only the **primary** model is remembered. Switching models mid-session with `/model` inside Claude Code is not persisted — the gateway only controls the launch-time default.
 
 ## How it works
 
@@ -157,7 +143,7 @@ Notes:
 
 ## Manage keys from the command line
 
-The gateway ships four subcommands that mutate a keypool provider's
+The gateway ships three subcommands that mutate a keypool provider's
 `AUTH_KEYS` / `CODING_KEYS` list and the corresponding macOS Keychain
 entries, so you never need to hand-edit `providers/<name>.sh` or paste
 keys on the command line (where they'd land in shell history).
@@ -166,7 +152,6 @@ keys on the command line (where they'd land in shell history).
 crouter add <provider>                       # add a key (auto-named)
 crouter add <provider> --name my-key-3       # add with explicit Keychain service name
 crouter add <provider> --surface coding      # add to the CODING_KEYS surface instead
-crouter rotate <provider> --name my-key-1    # replace the secret for an existing key
 crouter remove <provider> --name my-key-2    # remove from the keypool (asks for confirmation)
 crouter remove <provider> --name my-key-2 -y # skip confirmation
 crouter list keys <provider>                 # show what's registered, plus Keychain presence
@@ -233,7 +218,7 @@ ANTIGRAVITY_PORT=18080
 
 The proxy signs in with a Google account on first run — follow its own README for account setup. Keep it updated with `git pull && npm install`.
 
-Launching either Antigravity provider auto-starts the gateway if it is not running (`PRE_START` hook waits for `/health`); `crouter stop <provider>` shuts it down.
+Launching either Antigravity provider auto-starts the gateway if it is not running (`PRE_START` hook waits for `/health`).
 
 Gemini mapping (1M context):
 

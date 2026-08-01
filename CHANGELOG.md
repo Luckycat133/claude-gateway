@@ -2,6 +2,26 @@
 
 All notable changes to this local setup are documented in this file.
 
+## [0.4.3] - 2026-08-02
+
+### Removed
+- Dropped the `start` / `stop` / `forget` / `rotate` subcommands and the per-provider "last used model" memory (`.state/last-model/<provider>`). Model selection now resolves purely from `--model` > `ANTHROPIC_MODEL` env > provider `MODEL`.
+
+## [0.4.2] - 2026-08-02
+
+### Added
+- Management subcommands: `provider show`, `config show` / `config path`, `logs list` / `logs tail`, and `uninstall`.
+
+## [0.4.1] - 2026-08-02
+
+### Changed
+- Renamed the launcher and its messages from `claude-gateway` to `crouter` (filenames unchanged).
+
+## [0.4.0] - 2026-08-02
+
+### Added
+- Key-management subcommands for keypool providers: `add`, `rotate`, `remove`, `list keys` (Keychain-backed, TTY-entered secrets).
+
 ## [0.3.4] - 2026-08-01
 
 ### Changed

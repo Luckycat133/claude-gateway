@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Run Smoke Tests**: `./test/smoke.sh`
 - **Install Local Binary & Compatibility Launchers**: `./install.sh`
 - **Lint Shell Scripts**: `shellcheck bin/crouter bin/claude-antigravity bin/claude-antigravity-claude bin/claude-minimax install.sh test/smoke.sh providers/*.sh providers/lib/*.sh`
-- **Run Framework Entry Point**: `./bin/crouter list` (or `doctor`, `start <provider>`, `stop <provider>`, `add <provider>`, `rotate <provider>`, `remove <provider> --name <service>`, `list keys <provider>`, `forget <provider>`)
+- **Run Framework Entry Point**: `./bin/crouter list` (or `doctor`, `add <provider>`, `remove <provider> --name <service>`, `list keys <provider>`)
 
 ## Architecture & Code Structure
 
@@ -25,11 +25,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **Lifecycle Hooks**: `PRE_START` hook runs prior to launch (e.g. `antigravity_ensure_gateway` auto-starts the local proxy and polls `/health`).
 4. **Credential Resolution**: `AUTH_TOKEN` is resolved at launch time without exposing secrets in process environments or disk storage.
 5. **Isolated Execution**: Launches Claude Code via `env -i` with a clean, terminal-safe minimal environment (`HOME`, `PATH`, `TERM`, `LANG`, etc.) and injected `ANTHROPIC_*` environment variables.
-6. **Model Memory**: Remembers the last explicit primary model per provider in `.state/last-model/<provider>` and replays it next launch (precedence: `--model` > `ANTHROPIC_MODEL` env > remembered > provider `MODEL`). Reset via `crouter forget <provider>`. Only the primary model is tracked; in-session `/model` switches inside Claude Code are not persisted.
 
 ### Subcommands
 
-Subcommands are flat: `crouter <verb> [args]`. Verbs: `<provider>` (default — launch), `list [keys [provider]]`, `doctor [provider]`, `start <provider>`, `stop <provider>`, `forget <provider>`, `add <provider> [--surface main|coding] [--name <service>]`, `rotate <provider> --name <service> [--surface main|coding]`, `remove <provider> --name <service> [--surface main|coding] [-y]`. The four key-management verbs (`add` / `rotate` / `remove` / `list keys`) operate on a keypool provider's `AUTH_KEYS` / `CODING_KEYS` list and the matching macOS Keychain entries; `add` reads the secret from `/dev/tty` so it never appears in argv or shell history.
+Subcommands are flat: `crouter <verb> [args]`. Verbs: `<provider>` (default — launch), `list [keys [provider]]`, `doctor [provider]`, `add <provider> [--surface main|coding] [--name <service>]`, `remove <provider> --name <service> [--surface main|coding] [-y]`. The three key-management verbs (`add` / `remove` / `list keys`) operate on a keypool provider's `AUTH_KEYS` / `CODING_KEYS` list and the matching macOS Keychain entries; `add` reads the secret from `/dev/tty` so it never appears in argv or shell history.
 
 ### File Layout
 

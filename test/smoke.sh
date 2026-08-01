@@ -81,7 +81,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Key management subcommands (add / rotate / remove / list keys) on a fake
+# Key management subcommands (add / remove / list keys) on a fake
 # keypool provider. Stubs security(1) with shell functions so no real Keychain
 # is touched, and redirects AUTH_KEYS edits to a temporary provider file.
 # ---------------------------------------------------------------------------
@@ -275,18 +275,13 @@ else
   bad "remove accepted unknown service"
 fi
 
-# add/rotate: require a TTY, so we only check the failure path (non-keypool
+# add/remove: require a TTY, so we only check the failure path (non-keypool
 # providers must reject; the same surface logic is what we really want to
 # lock down without an interactive prompt).
 if fake_gw add antigravity 2>&1 | grep -q 'not in keypool mode'; then
   ok "add rejects non-keypool provider"
 else
   bad "add accepted non-keypool provider"
-fi
-if fake_gw rotate antigravity --name whatever 2>&1 | grep -q 'not in keypool mode'; then
-  ok "rotate rejects non-keypool provider"
-else
-  bad "rotate accepted non-keypool provider"
 fi
 if fake_gw remove antigravity --name whatever -y 2>&1 | grep -q 'not in keypool mode'; then
   ok "remove rejects non-keypool provider"
@@ -299,13 +294,6 @@ if fake_gw add demo --surface bogus 2>&1 | grep -q "unknown surface"; then
   ok "add rejects unknown --surface"
 else
   bad "add accepted unknown --surface"
-fi
-
-# forget: clearing the (already empty) model memory is a no-op success
-if fake_gw forget demo 2>&1 | grep -q "forgot last model"; then
-  ok "forget acknowledges (empty or populated) memory"
-else
-  bad "forget did not acknowledge"
 fi
 
 [ "$fail" -eq 0 ] && echo "All smoke tests passed." || echo "Some smoke tests FAILED."
