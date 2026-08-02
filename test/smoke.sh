@@ -1,5 +1,5 @@
 #!/bin/sh
-# Minimal offline smoke test for claude-gateway.
+# Minimal offline smoke test for crouter.
 # Requires no keychain entry or network access.
 set -u
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -162,7 +162,7 @@ chmod +x "$FAKE_BIN/security"
 GATEWAY_SH="$MOCK_DIR/cg-wrap.sh"
 cat > "$GATEWAY_SH" << EOF
 #!/bin/sh
-# Wrapper: point claude-gateway at our temp tree + fake security.
+# Wrapper: point crouter at our temp tree + fake security.
 export PATH="$FAKE_BIN:\$PATH"
 export MOCK_DIR="$MOCK_DIR"
 # Fake PROVIDERS_DIR via inline override: pass a fake config.sh that

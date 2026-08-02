@@ -2,7 +2,7 @@
 // keypool-proxy: a tiny, dependency-free local proxy that fronts an
 // Anthropic-compatible endpoint and rotates through a pool of API keys.
 //
-// Why this exists: claude-gateway launches Claude Code with a single
+// Why this exists: crouter launches Claude Code with a single
 // ANTHROPIC_API_KEY and has no visibility into the per-request HTTP errors
 // (429 / quota) that happen inside the Claude Code process. By pointing
 // ANTHROPIC_BASE_URL at this proxy, key rotation becomes transparent and

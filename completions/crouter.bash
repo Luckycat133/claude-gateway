@@ -1,7 +1,7 @@
 #!/bin/bash
 # Bash completion for crouter.
 # Source it from your shell rc, e.g.:
-#   source /path/to/claude-gateways/completions/crouter.bash
+#   source /path/to/crouters/completions/crouter.bash
 # or symlink it into your bash-completion directory.
 
 _crouter_providers() {
