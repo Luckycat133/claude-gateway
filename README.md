@@ -80,7 +80,8 @@ crouter all                           # start the unified gateway + Claude Code
 ```
 
 - `GET /v1/models` on the gateway returns the combined, namespaced catalog, so
-  `/model` can list and switch across providers.
+  `/model` can list and switch across providers. For Ollama the catalog is
+  enriched from `ollama list`, so locally-pulled models appear in `/model`.
 - Each request is routed by prefix to the right backend with that backend's own
   auth (Keychain keys for MiniMax/DeepSeek, the static token for Antigravity,
   the dummy token for Ollama). Keypool providers still rotate keys on 429.
@@ -93,6 +94,9 @@ crouter all                           # start the unified gateway + Claude Code
 > Note: Claude Code's `/model` listing for a custom base URL depends on the
 > Claude Code version; even if the list does not auto-populate, typing the
 > namespaced model (e.g. `/model ollama/qwen3.5:2b`) works.
+
+> **Verified (2026-08-02):** real `crouter all` traffic to `ollama/qwen3.5:2b`
+> and `deepseek/deepseek-v4-flash` (keypool) both returned HTTP 200.
 
 ## How it works
 

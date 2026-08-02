@@ -170,6 +170,15 @@ function forwardOnce(route, token, clientReq, clientRes, body, attemptIdx) {
     // Ollama-style: a dummy ANTHROPIC_AUTH_TOKEN (value ignored by backend).
     headers['anthropic-auth-token'] = token || 'ollama';
     headers['x-api-key'] = token || 'ollama';
+    // Mirror launch.sh: forward every EXTRA_ENV pair as a header too.
+    for (const kv of route.auth.extra_env || []) {
+      const i = kv.indexOf('=');
+      if (i < 0) continue;
+      const h = kv.slice(0, i);
+      const lh = h.toLowerCase();
+      if (lh === 'host' || lh === 'connection' || lh === 'content-length' || lh === 'transfer-encoding') continue;
+      headers[h] = kv.slice(i + 1);
+    }
   }
   // The body is rewritten (model prefix stripped), so its length differs from
   // the client's content-length. Drop it and let Node recompute.

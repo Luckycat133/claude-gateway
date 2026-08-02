@@ -4,6 +4,11 @@ All notable changes to this local setup are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-08-02
+
+### Fixed
+- `crouter all` (unified gateway) was broken for `none`-auth providers (ollama): `build_all_routes` split `EXTRA_ENV` on `;` only, but ollama's `EXTRA_ENV` is newline-separated, so the dummy token came out as `"ollama\nANTHROPIC_API_KEY=ollama"`. The gateway injected that as an invalid multi-line `x-api-key` header and the backend connection returned an empty reply. Now split on both newline and `;`, and forward the full `EXTRA_ENV` set as headers (mirroring `launch.sh`). The ollama catalog is also enriched from `ollama list` so `/model` can list locally-pulled models. Verified end-to-end against real ollama (`qwen3.5:2b`, HTTP 200) and real DeepSeek (`deepseek-v4-flash` via keypool, HTTP 200).
+
 ## [0.4.7] - 2026-08-02
 
 ### Added

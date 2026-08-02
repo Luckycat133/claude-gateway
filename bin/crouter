@@ -433,12 +433,19 @@ build_all_routes() {
       ;;
         *) _token="" ;;
       esac
-      # none-mode providers carry a dummy token in EXTRA_ENV (e.g. ollama).
+      # none-mode providers carry dummy token(s) in EXTRA_ENV (e.g. ollama:
+      # ANTHROPIC_AUTH_TOKEN=ollama / ANTHROPIC_API_KEY=ollama, separated by
+      # newline OR semicolon). Split on both so we don't grab the whole blob
+      # as one token (launch.sh uses IFS='\n'; mirror that here).
       _te=""
+      _extra=""
       if [ "$AUTH_MODE" = "none" ]; then
-        _ifs="$IFS"; IFS=';'
+        _ifs="$IFS"; IFS='
+;'
         for _kv in ${EXTRA_ENV:-}; do
+          [ -n "$_kv" ] || continue
           case "$_kv" in ANTHROPIC_AUTH_TOKEN=*) _te=${_kv#ANTHROPIC_AUTH_TOKEN=} ;; esac
+          _extra="$_extra $_kv"
         done
         IFS="$_ifs"
       fi
@@ -449,18 +456,29 @@ build_all_routes() {
         case "$_models" in *" $_m "*|"$_m "*|*" $_m"|"$_m") ;; *) _models="$_models $_m" ;; esac
       done
       _models=$(echo "$_models" | sed 's/^ *//; s/ *$//')
+      # ollama: pulled models are dynamic; enrich the catalog with the output of
+      # `ollama list` so /model can actually list them. Routing works by prefix
+      # regardless, but a usable listing is the whole point of the unified gateway.
+      if [ "$PROVIDER_NAME" = "ollama" ] && command -v ollama >/dev/null 2>&1; then
+        for _om in $(ollama list 2>/dev/null | awk 'NR>1{print $1}'); do
+          [ -n "$_om" ] || continue
+          case "$_models" in *" $_om "*|"$_om "*|*" $_om"|"$_om") ;; *) _models="$_models $_om" ;; esac
+        done
+        _models=$(echo "$_models" | sed 's/^ *//; s/ *$//')
+      fi
       PROVIDER_NAME="$PROVIDER_NAME" BASE_URL="$BASE_URL" AUTH_MODE2="$AUTH_MODE" \
-      AUTH_TOKEN_EXTRA="$_te" KEYS_JOINED="$_keys" MODELS_JOINED="$_models" \
+      AUTH_TOKEN_EXTRA="$_te" EXTRA_ENV_JOINED="$_extra" KEYS_JOINED="$_keys" MODELS_JOINED="$_models" \
       "$NODE_BIN" -e '
         const p=process.env.PROVIDER_NAME, base=process.env.BASE_URL, am=process.env.AUTH_MODE2;
         const token=process.env.AUTH_TOKEN_EXTRA||"";
+        const extraEnv=(process.env.EXTRA_ENV_JOINED||"").split(/\s+/).filter(Boolean);
         const models=(process.env.MODELS_JOINED||"").split(/\s+/).filter(Boolean);
         let auth;
         if(am==="keypool"||am==="keychain"||am==="static"){
           const keys=(process.env.KEYS_JOINED||"").split(/\s+/).filter(Boolean);
           auth={type:"keypool",keys};
         } else {
-          auth={type:"none",token};
+          auth={type:"none",token,extra_env:extraEnv};
         }
         process.stdout.write(JSON.stringify({prefix:p,base_url:base,auth,models})+String.fromCharCode(10));
       '
