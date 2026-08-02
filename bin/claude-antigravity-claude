@@ -1,15 +1,1 @@
-#!/bin/sh
-# Backward-compatible shortcut for Antigravity Claude models.
-set -u
-
-SELF=$0
-while [ -h "$SELF" ]; do
-  SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
-  LINK=$(readlink "$SELF")
-  case $LINK in
-    /*) SELF=$LINK ;;
-    *) SELF=$SELF_DIR/$LINK ;;
-  esac
-done
-BIN_DIR=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
-exec "$BIN_DIR/crouter" antigravity-claude "$@"
+crouter-compat

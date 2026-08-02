@@ -2,6 +2,11 @@
 
 All notable changes to this local setup are documented in this file.
 
+## [Unreleased]
+
+### Changed
+- Deduplicated the four compatibility launchers (`bin/claude-minimax`, `claude-antigravity`, `claude-deepseek`, `claude-antigravity-claude`) into a single shared `bin/crouter-compat` that derives the provider from the invoked name (strips the `claude-` prefix). The four launchers are now symlinks to it, eliminating ~45 lines of duplicated symlink-resolution boilerplate. `install.sh` links each shortcut to `crouter-compat`.
+
 ## [0.4.4] - 2026-08-02
 
 ### Changed
