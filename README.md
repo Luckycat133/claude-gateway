@@ -7,7 +7,7 @@ No API key is ever stored in this repository. Keys are resolved at launch time f
 ## Layout
 
 ```text
-ai-coding-gateways/
+crouter/
 ├── bin/
 │   └── crouter             # The only entry point
 ├── providers/
@@ -246,7 +246,7 @@ Ollama v0.14.0+ exposes the Anthropic Messages API natively on `http://localhost
 One-time setup:
 
 ```sh
-ollama pull glm-4.7-flash            # or qwen3-coder / gpt-oss:20b / a :cloud model
+ollama pull glm-4.7-flash            # default; qwen3.5:2b verified locally; or qwen3-coder / gpt-oss:20b / a :cloud model
 ```
 
 Launch (override the model per session — Claude Code requests opus/sonnet/haiku tiers internally):
@@ -266,6 +266,8 @@ ollama cp glm-4.7-flash claude-3-5-sonnet
 | Default / opus / sonnet / haiku / subagents | `glm-4.7-flash` (the `MODEL_*` defaults in `providers/ollama.sh`) |
 
 Note: Ollama defaults a model's context window small; agentic Claude Code needs a large one. The provider sets `CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536` as a safe floor — raise it per your VRAM (bake `num_ctx` into a Modelfile, or set `OLLAMA_CONTEXT_LENGTH` before `ollama serve`). Optional `EFFORT` (e.g. `medium`) is available for thinking-capable models; leave it empty otherwise.
+
+> **Verified (2026-08-02):** started `ollama serve` and ran `crouter ollama --model qwen3.5:2b -p "Reply with exactly one word: pong"` end-to-end — Claude Code connected via the injected `ANTHROPIC_BASE_URL=http://localhost:11434` + `ANTHROPIC_AUTH_TOKEN=ollama` and returned `pong`. No proxy, no API key.
 
 ## What to commit
 
