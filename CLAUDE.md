@@ -34,7 +34,7 @@ Subcommands are flat: `crouter <verb> [args]`. Verbs: `<provider>` (default — 
 
 - `bin/crouter`: Core entry point owning launcher execution, auth lookup, key-management commands, and environment isolation.
 - `bin/claude-*`: Compatibility launchers — symlinks to `bin/crouter-compat` that delegate to specific provider commands (the provider is derived from the invoked name).
-- `providers/`: Provider definitions (`minimax.sh`, `antigravity.sh` for Gemini, `antigravity-claude.sh` for Claude, `deepseek.sh`).
+- `providers/`: Provider definitions (`minimax.sh`, `antigravity.sh` for Gemini, `antigravity-claude.sh` for Claude, `deepseek.sh`, `ollama.sh` for local/cloud Ollama models via its native Anthropic API).
 - `providers/lib/`: Shared provider utilities (`antigravity-common.sh` for proxy management).
 - `install.sh`: Creates executable symlinks in `$INSTALL_DIR` (`~/.local/bin`) and copies `config.example.sh` to `config.sh`.
 - `test/smoke.sh`: Hermetic offline smoke test suite (with stubs for `security(1)` / `node(1)` so key-management paths run without a real Keychain or Node).

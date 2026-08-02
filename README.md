@@ -15,6 +15,7 @@ ai-coding-gateways/
 │   ├── deepseek.sh                # DeepSeek V4 (Flash/Pro) via /anthropic endpoint
 │   ├── antigravity.sh             # Gemini via local Antigravity proxy
 │   ├── antigravity-claude.sh      # Claude via local Antigravity proxy
+│   ├── ollama.sh                  # Ollama local/cloud models (native Anthropic API)
 │   └── lib/antigravity-common.sh  # Shared gateway lifecycle helpers
 ├── config.example.sh              # Copy to config.sh (gitignored)
 ├── install.sh                     # Symlink crouter into ~/.local/bin
@@ -35,9 +36,10 @@ claude-minimax                # crouter minimax
 claude-antigravity            # crouter antigravity
 claude-antigravity-claude     # crouter antigravity-claude
 claude-deepseek              # crouter deepseek
+claude-ollama                # crouter ollama
 ```
 
-To use the Antigravity providers, also set up the third-party proxy (see below). MiniMax needs no extra setup beyond the Keychain key.
+To use the Antigravity providers, also set up the third-party proxy (see below). MiniMax needs no extra setup beyond the Keychain key. Ollama needs no proxy or key — it serves the Anthropic API locally on port 11434 (see the Ollama section below).
 
 ## Usage
 
@@ -47,6 +49,7 @@ crouter minimax                  # Claude Code via MiniMax M3
 crouter antigravity             # Claude Code via Antigravity Gemini
 crouter antigravity-claude       # Claude Code via Antigravity Claude
 crouter deepseek                  # Claude Code via DeepSeek V4 (Flash/Pro)
+crouter ollama                    # Claude Code via Ollama (local/cloud models)
 crouter doctor [provider]        # environment diagnostics
 ```
 
@@ -235,6 +238,34 @@ Claude mapping (200K context): default and `/model opus` → `claude-opus-4-6-th
 Do not switch between Gemini and Claude models inside one session — their thinking signatures are incompatible. Start a new session with the matching provider instead.
 
 The Antigravity proxy is an unofficial integration. Do not use it with a primary Google account, sensitive source code, or production credentials.
+
+### Ollama (local / cloud open-weight models)
+
+Ollama v0.14.0+ exposes the Anthropic Messages API natively on `http://localhost:11434`, so Claude Code talks to it with **no translation proxy and no API key** — only a dummy `ANTHROPIC_AUTH_TOKEN` (Ollama ignores its value). `providers/ollama.sh` sets `AUTH_MODE="none"` and injects `ANTHROPIC_AUTH_TOKEN=ollama` via `EXTRA_ENV`; `PRE_START` verifies the Ollama service is up and `HEALTH_CHECK_URL` lets `doctor` check it.
+
+One-time setup:
+
+```sh
+ollama pull glm-4.7-flash            # or qwen3-coder / gpt-oss:20b / a :cloud model
+```
+
+Launch (override the model per session — Claude Code requests opus/sonnet/haiku tiers internally):
+
+```sh
+crouter ollama --model glm-4.7-flash
+```
+
+To make the default tier aliases "just work", alias a local model to a tier name:
+
+```sh
+ollama cp glm-4.7-flash claude-3-5-sonnet
+```
+
+| Claude Code selection | Ollama model |
+| --- | --- |
+| Default / opus / sonnet / haiku / subagents | `glm-4.7-flash` (the `MODEL_*` defaults in `providers/ollama.sh`) |
+
+Note: Ollama defaults a model's context window small; agentic Claude Code needs a large one. The provider sets `CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536` as a safe floor — raise it per your VRAM (bake `num_ctx` into a Modelfile, or set `OLLAMA_CONTEXT_LENGTH` before `ollama serve`). Optional `EFFORT` (e.g. `medium`) is available for thinking-capable models; leave it empty otherwise.
 
 ## What to commit
 

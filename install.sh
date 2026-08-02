@@ -13,7 +13,7 @@ chmod +x "$ROOT_DIR/bin/crouter"
 # All compatibility shortcuts are symlinks to the single shared launcher, which
 # derives the provider from the invoked name (strips the "claude-" prefix).
 chmod +x "$ROOT_DIR/bin/crouter-compat"
-for shortcut in claude-minimax claude-antigravity claude-antigravity-claude claude-deepseek; do
+for shortcut in claude-minimax claude-antigravity claude-antigravity-claude claude-deepseek claude-ollama; do
   ln -sf "$ROOT_DIR/bin/crouter-compat" "$INSTALL_DIR/$shortcut"
 done
 
@@ -23,7 +23,7 @@ if [ ! -f "$ROOT_DIR/config.sh" ]; then
 fi
 
 echo "Installed: $INSTALL_DIR/crouter -> $ROOT_DIR/bin/crouter"
-echo "Installed compatibility shortcuts: claude-minimax, claude-antigravity, claude-antigravity-claude, claude-deepseek"
+echo "Installed compatibility shortcuts: claude-minimax, claude-antigravity, claude-antigravity-claude, claude-deepseek, claude-ollama"
 echo "crouter $VERSION"
 
 case :$PATH: in
