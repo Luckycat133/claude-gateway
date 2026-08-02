@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Run Smoke Tests**: `./test/smoke.sh`
 - **Install Local Binary & Compatibility Launchers**: `./install.sh`
-- **Lint Shell Scripts**: `shellcheck bin/crouter bin/claude-antigravity bin/claude-antigravity-claude bin/claude-minimax install.sh test/smoke.sh providers/*.sh providers/lib/*.sh`
+- **Lint Shell Scripts**: `shellcheck bin/crouter bin/crouter-compat install.sh test/smoke.sh providers/*.sh providers/lib/*.sh`
 - **Run Framework Entry Point**: `./bin/crouter list` (or `doctor`, `add <provider>`, `remove <provider> --name <service>`, `list keys <provider>`)
 
 ## Architecture & Code Structure
@@ -33,7 +33,7 @@ Subcommands are flat: `crouter <verb> [args]`. Verbs: `<provider>` (default — 
 ### File Layout
 
 - `bin/crouter`: Core entry point owning launcher execution, auth lookup, key-management commands, and environment isolation.
-- `bin/claude-*`: Compatibility launchers delegating to specific provider commands.
+- `bin/claude-*`: Compatibility launchers — symlinks to `bin/crouter-compat` that delegate to specific provider commands (the provider is derived from the invoked name).
 - `providers/`: Provider definitions (`minimax.sh`, `antigravity.sh` for Gemini, `antigravity-claude.sh` for Claude, `deepseek.sh`).
 - `providers/lib/`: Shared provider utilities (`antigravity-common.sh` for proxy management).
 - `install.sh`: Creates executable symlinks in `$INSTALL_DIR` (`~/.local/bin`) and copies `config.example.sh` to `config.sh`.
