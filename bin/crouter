@@ -146,33 +146,42 @@ resolve_auth() {
 # and expose its URL. Claude Code then talks to the proxy, which rotates keys on
 # 429/401 so quota exhaustion is handled transparently (mid-session).
 #
-# Optional second surface: when CODING_BASE_URL is set, the gateway tries that
-# endpoint after the main surface's keys are exhausted. This lets a single
-# provider span multiple billing tiers (e.g. MiniMax Token Plan vs Coding Plan)
-# without changing the launcher.
+# Plus-endpoint ordering: when PLUS_URL + PLUS_KEYS are configured, the plus
+# keys and plus URL are placed FIRST in the proxy's attempt list. All keys share
+# the same upstream account quota — the plus endpoint is just a different
+# URL on the same account (e.g. Coding Plan vs Token Plan). Each key is tried
+# against every declared target in order; the proxy does not treat surfaces
+# as exclusive.
 start_keypool() {
   [ -n "$NODE_BIN" ] || die "node not found; keypool proxy cannot start"
   [ -n "${AUTH_KEYS:-}" ] || die "provider '$PROVIDER_NAME': AUTH_MODE=keypool requires AUTH_KEYS"
 
-  _pool=""
+  _plus_pool=""
+  if [ -n "${PLUS_URL:-}" ] && [ -n "${PLUS_KEYS:-}" ]; then
+    for _ref in $PLUS_KEYS; do
+      _t=$(security find-generic-password -a "$USER" -s "$_ref" -w 2>/dev/null)
+      [ -n "$_t" ] || die "keychain item '$_ref' not found (provider '$PROVIDER_NAME')"
+      _plus_pool="$_plus_pool $_t"
+    done
+    _plus_pool=$(echo "$_plus_pool" | sed 's/^ *//; s/ *$//')
+  fi
+
+  _main_pool=""
   for _ref in $AUTH_KEYS; do
     _t=$(security find-generic-password -a "$USER" -s "$_ref" -w 2>/dev/null)
     [ -n "$_t" ] || die "keychain item '$_ref' not found (provider '$PROVIDER_NAME')"
-    _pool="$_pool $_t"
+    _main_pool="$_main_pool $_t"
   done
+  _main_pool=$(echo "$_main_pool" | sed 's/^ *//; s/ *$//')
 
-  _targets="$BASE_URL"
-  if [ -n "${CODING_BASE_URL:-}" ]; then
-    _targets="$_targets;$CODING_BASE_URL"
-    if [ -n "${CODING_KEYS:-}" ]; then
-      for _ref in $CODING_KEYS; do
-        _t=$(security find-generic-password -a "$USER" -s "$_ref" -w 2>/dev/null)
-        [ -n "$_t" ] || die "keychain item '$_ref' not found (provider '$PROVIDER_NAME')"
-        _pool="$_pool $_t"
-      done
-    fi
+  # Plus first: plus keys, then main keys. Plus URL first, then main URL.
+  if [ -n "$_plus_pool" ]; then
+    _pool="$_plus_pool $_main_pool"
+    _targets="$PLUS_URL;$BASE_URL"
+  else
+    _pool="$_main_pool"
+    _targets="$BASE_URL"
   fi
-  _pool=$(echo "$_pool" | sed 's/^ *//; s/ *$//')
 
   _out=$(mktemp -t keypool.XXXXXX)
   KEYPOOL_KEYS="$_pool" KEYPOOL_TARGETS="$_targets" KEYPOOL_PORT=0 \
@@ -194,7 +203,15 @@ start_keypool() {
   fi
   KEYPOOL_URL="http://127.0.0.1:$_lp"
   export KEYPOOL_URL KEYPOOL_PID
-  info "keypool: proxy on $KEYPOOL_URL ($(echo "$_pool" | wc -w | tr -d ' ') keys, $(echo "$_targets" | tr ';' '\n' | wc -l | tr -d ' ') surfaces)"
+  _nkeys=$(echo "$_pool" | wc -w | tr -d ' ')
+  _ntargets=$(echo "$_targets" | tr ';' '\n' | wc -l | tr -d ' ')
+  _note=""
+  if [ "$_ntargets" -gt 1 ]; then
+    _note=" (plus-first: $_ntargets endpoints, $_nkeys keys)"
+  else
+    _note=" ($_nkeys keys, 1 endpoint)"
+  fi
+  info "keypool: proxy on $KEYPOOL_URL$_note"
 }
 
 # Non-destructive availability check used by status/doctor (never prints secrets).
@@ -289,7 +306,18 @@ cmd_run() {
   if [ "$_bypass_auth" -eq 0 ]; then
     run_pre_start
     if [ "${AUTH_MODE:-}" = "keypool" ]; then
-      start_keypool
+      # Auto-degrade: if AUTH_KEYS has exactly one key and there's no PLUS_KEYS,
+      # bypass the keypool-proxy and use the single key directly. Avoids spinning
+      # up a Node proxy for what is effectively a single-key session.
+      _main_count=$(set -- $AUTH_KEYS; echo $#)
+      _plus_count=$(set -- ${PLUS_KEYS:-}; echo $#)
+      if [ "$_main_count" -eq 1 ] && [ "$_plus_count" -eq 0 ]; then
+        AUTH_REFERENCE=$(set -- $AUTH_KEYS; printf '%s' "$1")
+        AUTH_MODE=keychain
+        resolve_auth
+      else
+        start_keypool
+      fi
     else
       resolve_auth
     fi
@@ -439,17 +467,17 @@ cmd_doctor() {
 
 # ---------------------------------------------------------------------------
 # Key management (keypool providers). Edits the provider's AUTH_KEYS /
-# CODING_KEYS lines in providers/<name>.sh and stores/updates the secret in
+# PLUS_KEYS lines in providers/<name>.sh and stores/updates the secret in
 # macOS Keychain. Never prints the secret value.
 # ---------------------------------------------------------------------------
 
 # _surface_var <name>   ->  variable name holding the keys for that surface.
-# Supported: "main" -> AUTH_KEYS, "coding" -> CODING_KEYS.
+# Supported: "main" -> AUTH_KEYS, "plus" -> PLUS_KEYS.
 _surface_var() {
   case $1 in
     main)    printf 'AUTH_KEYS' ;;
-    coding)  printf 'CODING_KEYS' ;;
-    *) die "unknown surface '$1' (expected: main or coding)" ;;
+    plus)  printf 'PLUS_KEYS' ;;
+    *) die "unknown surface '$1' (expected: main or plus)" ;;
   esac
 }
 
@@ -529,13 +557,13 @@ cmd_add_key() {
   _name=
   while [ $# -gt 0 ]; do
     case $1 in
-      --surface) [ $# -ge 2 ] || die "add: --surface needs an argument (main|coding)"
+      --surface) [ $# -ge 2 ] || die "add: --surface needs an argument (main|plus)"
                  _surface=$2; shift 2 ;;
       --surface=*) _surface=${1#--surface=}; shift ;;
       --name)   [ $# -ge 2 ] || die "add: --name needs an argument (keychain service name)"
                 _name=$2; shift 2 ;;
       --name=*) _name=${1#--name=}; shift ;;
-      -h|--help) info "usage: crouter add <provider> [--surface main|coding] [--name <service>]"; return 0 ;;
+      -h|--help) info "usage: crouter add <provider> [--surface main|plus] [--name <service>]"; return 0 ;;
       *) die "add: unknown argument '$1'" ;;
     esac
   done
@@ -562,7 +590,7 @@ cmd_add_key() {
   _keychain_put "$_name" "$_secret"
   unset _secret
 
-  # Append to AUTH_KEYS / CODING_KEYS in providers/<provider>.sh.
+  # Append to AUTH_KEYS / PLUS_KEYS in providers/<provider>.sh.
   if [ -z "$_existing" ]; then
     _new="$_name"
   else
@@ -585,14 +613,14 @@ cmd_remove_key() {
   _yes=0
   while [ $# -gt 0 ]; do
     case $1 in
-      --surface) [ $# -ge 2 ] || die "remove: --surface needs an argument (main|coding)"
+      --surface) [ $# -ge 2 ] || die "remove: --surface needs an argument (main|plus)"
                  _surface=$2; shift 2 ;;
       --surface=*) _surface=${1#--surface=}; shift ;;
       --name)   [ $# -ge 2 ] || die "remove: --name needs an argument"
                 _name=$2; shift 2 ;;
       --name=*) _name=${1#--name=}; shift ;;
       -y|--yes) _yes=1; shift ;;
-      -h|--help) info "usage: crouter remove <provider> --name <service> [--surface main|coding] [-y]"; return 0 ;;
+      -h|--help) info "usage: crouter remove <provider> --name <service> [--surface main|plus] [-y]"; return 0 ;;
       *) die "remove: unknown argument '$1'" ;;
     esac
   done
@@ -637,7 +665,7 @@ cmd_list_keys() {
 
   case "${AUTH_MODE:-}" in
     keypool)
-      for _surface in main coding; do
+      for _surface in main plus; do
         _var=$(_surface_var "$_surface")
         _existing=$(_read_kv "$_file" "$_var")
         if [ -z "$_existing" ]; then continue; fi
@@ -717,9 +745,9 @@ cmd_provider_show() {
     none)     ;;
     keypool)
       printf '  AUTH_KEYS:      %s\n' "${AUTH_KEYS:-<empty>}"
-      if [ -n "${CODING_BASE_URL:-}" ]; then
-        printf '  CODING_BASE_URL: %s\n' "$CODING_BASE_URL"
-        printf '  CODING_KEYS:     %s\n' "${CODING_KEYS:-<empty>}"
+      if [ -n "${PLUS_URL:-}" ]; then
+        printf '  PLUS_URL: %s\n' "$PLUS_URL"
+        printf '  PLUS_KEYS:     %s\n' "${PLUS_KEYS:-<empty>}"
       fi
       ;;
   esac
@@ -855,8 +883,8 @@ case $cmd in
     fi
     ;;
   doctor)         cmd_doctor "${1:-}" ;;
-  add)            [ $# -ge 1 ] || die "usage: crouter add <provider> [--surface main|coding] [--name <service>]"; cmd_add_key "$@" ;;
-  remove)         [ $# -ge 1 ] || die "usage: crouter remove <provider> --name <service> [--surface main|coding]"; cmd_remove_key "$@" ;;
+  add)            [ $# -ge 1 ] || die "usage: crouter add <provider> [--surface main|plus] [--name <service>]"; cmd_add_key "$@" ;;
+  remove)         [ $# -ge 1 ] || die "usage: crouter remove <provider> --name <service> [--surface main|plus]"; cmd_remove_key "$@" ;;
   provider)
     [ $# -ge 1 ] || die "usage: crouter provider show <provider>"
     cmd_provider_show "$1" ;;

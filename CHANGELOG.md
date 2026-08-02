@@ -2,6 +2,13 @@
 
 All notable changes to this local setup are documented in this file.
 
+## [0.4.4] - 2026-08-02
+
+### Changed
+- Renamed the second surface (MiniMax Coding Plan) variables `CODING_BASE_URL` / `CODING_KEYS` to `PLUS_URL` / `PLUS_KEYS`, and the `--surface` value `coding` to `plus`, across the launcher, `providers/minimax.sh`, README, and CLAUDE.md.
+- The keypool proxy now orders the plus surface **first** (plus keys + plus URL ahead of the main Token Plan), spending the plus plan's quota before falling back.
+- Single-key keypool providers (exactly one `AUTH_KEYS` entry and no `PLUS_KEYS`) auto-degrade: the gateway bypasses the Node keypool proxy and uses the single key directly via keychain auth, avoiding an unnecessary proxy process.
+
 ## [0.4.3] - 2026-08-02
 
 ### Removed

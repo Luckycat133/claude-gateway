@@ -27,10 +27,10 @@ AUTH_MODE="keypool"
 AUTH_KEYS="codex-minimax-token-plan"
 # Optional second surface: MiniMax Coding Plan. Per your note its endpoint and
 # supported models differ from the API/Token Plan, so it is declared separately.
-# Leave commented until you have the coding-plan key(s); once set, claude-minimax
+# Leave commented until you have the plus-plan key(s); once set, claude-minimax
 # will try this surface automatically after the API surface's keys are exhausted.
-# CODING_BASE_URL="https://api.minimaxi.com/anthropic"
-# CODING_KEYS="minimax-coding-1 minimax-coding-2"
+# PLUS_URL="https://api.minimaxi.com/anthropic"
+# PLUS_KEYS="minimax-coding-1 minimax-coding-2"
 
 # Extra environment, one KEY=VALUE per line.
 EXTRA_ENV="API_TIMEOUT_MS=3000000

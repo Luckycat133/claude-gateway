@@ -123,8 +123,8 @@ AUTH_MODE="keypool"
 AUTH_KEYS="codex-minimax-token-plan"   # append more Keychain service names here
 # Optional second surface (MiniMax Coding Plan). Its endpoint and supported
 # models differ from the Token Plan; fill these once you have the key(s):
-# CODING_BASE_URL="https://.../anthropic"
-# CODING_KEYS="minimax-coding-1 minimax-coding-2"
+# PLUS_URL="https://.../anthropic"
+# PLUS_KEYS="minimax-coding-1 minimax-coding-2"
 ```
 
 Add a key (no shell-history exposure):
@@ -144,14 +144,14 @@ Notes:
 ## Manage keys from the command line
 
 The gateway ships three subcommands that mutate a keypool provider's
-`AUTH_KEYS` / `CODING_KEYS` list and the corresponding macOS Keychain
+`AUTH_KEYS` / `PLUS_KEYS` list and the corresponding macOS Keychain
 entries, so you never need to hand-edit `providers/<name>.sh` or paste
 keys on the command line (where they'd land in shell history).
 
 ```sh
 crouter add <provider>                       # add a key (auto-named)
 crouter add <provider> --name my-key-3       # add with explicit Keychain service name
-crouter add <provider> --surface coding      # add to the CODING_KEYS surface instead
+crouter add <provider> --surface plus      # add to the PLUS_KEYS surface instead
 crouter remove <provider> --name my-key-2    # remove from the keypool (asks for confirmation)
 crouter remove <provider> --name my-key-2 -y # skip confirmation
 crouter list keys <provider>                 # show what's registered, plus Keychain presence
@@ -168,7 +168,7 @@ other `AUTH_MODE`. The provider must be in `AUTH_MODE="keypool"` for
 
 ### MiniMax Token Plan
 
-China endpoint `https://api.minimaxi.com/anthropic`, default `MiniMax-M3`, 1,048,576-token input context. It runs in `AUTH_MODE="keypool"`: the Keychain item `codex-minimax-token-plan` is the first entry in `AUTH_KEYS`, and you can add more keys, or a separate Coding Plan surface via `CODING_BASE_URL`/`CODING_KEYS` — see [Key pool & automatic failover](#key-pool--automatic-failover). To set or rotate a key without shell-history exposure:
+China endpoint `https://api.minimaxi.com/anthropic`, default `MiniMax-M3`, 1,048,576-token input context. It runs in `AUTH_MODE="keypool"`: the Keychain item `codex-minimax-token-plan` is the first entry in `AUTH_KEYS`, and you can add more keys, or a separate Coding Plan surface via `PLUS_URL`/`PLUS_KEYS` — see [Key pool & automatic failover](#key-pool--automatic-failover). To set or rotate a key without shell-history exposure:
 
 ```sh
 read -s "MINIMAX_TOKEN_PLAN_KEY?Paste MiniMax Token Plan Key: "
