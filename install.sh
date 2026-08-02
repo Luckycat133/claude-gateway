@@ -12,10 +12,16 @@ chmod +x "$ROOT_DIR/bin/crouter"
 
 # All compatibility shortcuts are symlinks to the single shared launcher, which
 # derives the provider from the invoked name (strips the "claude-" prefix).
+# The list is derived from providers/ so adding a provider needs no edit here.
 chmod +x "$ROOT_DIR/bin/crouter-compat"
-for shortcut in claude-minimax claude-antigravity claude-antigravity-claude claude-deepseek claude-ollama; do
-  ln -sf "$ROOT_DIR/bin/crouter-compat" "$INSTALL_DIR/$shortcut"
+SHORTCUTS=""
+for f in "$ROOT_DIR"/providers/*.sh; do
+  [ -f "$f" ] || continue
+  name=$(basename -- "$f" .sh)
+  ln -sf "$ROOT_DIR/bin/crouter-compat" "$INSTALL_DIR/claude-$name"
+  SHORTCUTS="$SHORTCUTS claude-$name"
 done
+SHORTCUTS=$(echo "$SHORTCUTS" | sed 's/^ *//')
 
 if [ ! -f "$ROOT_DIR/config.sh" ]; then
   cp "$ROOT_DIR/config.example.sh" "$ROOT_DIR/config.sh"
@@ -23,7 +29,7 @@ if [ ! -f "$ROOT_DIR/config.sh" ]; then
 fi
 
 echo "Installed: $INSTALL_DIR/crouter -> $ROOT_DIR/bin/crouter"
-echo "Installed compatibility shortcuts: claude-minimax, claude-antigravity, claude-antigravity-claude, claude-deepseek, claude-ollama"
+echo "Installed compatibility shortcuts: $(echo "$SHORTCUTS" | tr ' ' ',' | sed 's/,/, /g')"
 echo "crouter $VERSION"
 
 case :$PATH: in

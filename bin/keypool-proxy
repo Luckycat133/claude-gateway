@@ -9,15 +9,23 @@
 // mid-session: when one key is rate-limited / quota-exhausted (HTTP 429) or
 // rejected (401), the proxy swaps to the next key and retries the request.
 //
-// Env contract (all required except KEYPOOL_TARGETS_MODEL usage):
-//   KEYPOOL_PORT      port to listen on (127.0.0.1 only)
-//   KEYPOOL_KEYS      space-separated list of API keys
-//   KEYPOOL_TARGETS   ";"-separated entries, each "BASE_URL" or "BASE_URL|MODEL"
-//                     e.g. "https://api.minimaxi.com/anthropic;https://x/anthropic|coding"
-//   KEYPOOL_MAX_RETRY max attempts before giving up (default: keys*targets)
+// Env contract:
+//   KEYPOOL_PORT       port to listen on (127.0.0.1 only)
+//   KEYPOOL_KEYS       space-separated list of API keys
+//   KEYPOOL_TARGETS    ";"-separated entries, each "BASE_URL" or "BASE_URL|MODEL"
+//                      e.g. "https://api.minimaxi.com/anthropic;https://x/anthropic|coding"
+//   KEYPOOL_MAX_RETRY  max attempts before giving up (default: candidate count)
+//   KEYPOOL_CANDIDATES optional JSON array that REPLACES keys x targets with an
+//                      explicit, heterogeneous attempt list. Each entry:
+//                        {"url": "...", "type": "bearer|x-api-key|both", "token": "..."}
+//                      Used by dual-source providers (anthropic/openai/openrouter)
+//                      where the preferred "default account" (subscription OAuth,
+//                      Bearer) and the fallback API key (x-api-key) need DIFFERENT
+//                      auth headers and possibly different URLs.
 //
-// Attempt ordering is: for each target, try every key. So all keys on the
-// first surface are exhausted before falling through to the next surface.
+// Attempt ordering: with KEYPOOL_CANDIDATES it is exactly the array order.
+// Otherwise, for each target, try every key — all keys on the first surface are
+// exhausted before falling through to the next surface.
 
 'use strict';
 const http = require('http');
@@ -32,17 +40,20 @@ function fail(msg) {
 const PORT = parseInt(process.env.KEYPOOL_PORT, 10);
 if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) fail('KEYPOOL_PORT missing/invalid');
 
+const RAW_CANDIDATES = (process.env.KEYPOOL_CANDIDATES || '').trim();
+const USE_CANDIDATES = RAW_CANDIDATES.length > 0;
+
 const KEYS = (process.env.KEYPOOL_KEYS || '')
   .split(/\s+/)
   .map((s) => s.trim())
   .filter(Boolean);
-if (KEYS.length === 0) fail('KEYPOOL_KEYS empty');
+if (!USE_CANDIDATES && KEYS.length === 0) fail('KEYPOOL_KEYS empty');
 
 const rawTargets = (process.env.KEYPOOL_TARGETS || '')
   .split(';')
   .map((s) => s.trim())
   .filter(Boolean);
-if (rawTargets.length === 0) fail('KEYPOOL_TARGETS empty');
+if (!USE_CANDIDATES && rawTargets.length === 0) fail('KEYPOOL_TARGETS empty');
 
 function parseTarget(spec) {
   const [base, model] = spec.split('|');
@@ -62,13 +73,36 @@ function parseTarget(spec) {
   };
 }
 
-const TARGETS = rawTargets.map(parseTarget);
-
-// Flat attempt list: for each target, every key.
+// Flat attempt list. Each entry: { target, token, type, label }.
+//   type: 'both' (legacy keypool), 'bearer', 'x-api-key', or 'none'.
 const ATTEMPTS = [];
-for (let t = 0; t < TARGETS.length; t++) {
-  for (let k = 0; k < KEYS.length; k++) {
-    ATTEMPTS.push({ t, k });
+if (USE_CANDIDATES) {
+  let parsed;
+  try {
+    parsed = JSON.parse(RAW_CANDIDATES);
+  } catch (e) {
+    fail('KEYPOOL_CANDIDATES is not valid JSON: ' + e.message);
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) fail('KEYPOOL_CANDIDATES must be a non-empty array');
+  parsed.forEach((c, i) => {
+    if (!c || !c.url) fail('KEYPOOL_CANDIDATES[' + i + '] missing url');
+    const type = c.type || 'both';
+    if (['both', 'bearer', 'x-api-key', 'none'].indexOf(type) === -1) {
+      fail('KEYPOOL_CANDIDATES[' + i + '] bad type: ' + type);
+    }
+    ATTEMPTS.push({
+      target: parseTarget(c.url),
+      token: c.token || '',
+      type: type,
+      label: (c.label || 'candidate ' + i) + ' [' + type + ']',
+    });
+  });
+} else {
+  const TARGETS = rawTargets.map(parseTarget);
+  for (let t = 0; t < TARGETS.length; t++) {
+    for (let k = 0; k < KEYS.length; k++) {
+      ATTEMPTS.push({ target: TARGETS[t], token: KEYS[k], type: 'both', label: 'key ' + k + ' on target ' + t });
+    }
   }
 }
 
@@ -107,9 +141,8 @@ function attempt(i, clientReq, clientRes, body) {
     clientRes.end(JSON.stringify({ error: { type: 'keypool_exhausted', message: 'all keys/retries exhausted' } }));
     return;
   }
-  const { t, k } = ATTEMPTS[i];
-  const target = TARGETS[t];
-  const key = KEYS[k];
+  const cand = ATTEMPTS[i];
+  const target = cand.target;
 
   const headers = {};
   for (const [h, v] of Object.entries(clientReq.headers)) {
@@ -117,8 +150,17 @@ function attempt(i, clientReq, clientRes, body) {
     if (lh === 'host' || lh === 'authorization' || lh === 'x-api-key' || lh === 'connection' || lh === 'proxy-connection') continue;
     headers[h] = v;
   }
-  headers['x-api-key'] = key;
-  headers['authorization'] = 'Bearer ' + key;
+  // Auth header shape matters: an Anthropic subscription OAuth token MUST go out
+  // as `Authorization: Bearer` only — sending it as x-api-key gets it rejected.
+  if (cand.type === 'bearer') {
+    headers['authorization'] = 'Bearer ' + cand.token;
+  } else if (cand.type === 'x-api-key') {
+    headers['x-api-key'] = cand.token;
+  } else if (cand.type === 'both') {
+    headers['x-api-key'] = cand.token;
+    headers['authorization'] = 'Bearer ' + cand.token;
+  }
+  // type === 'none': send no credential at all (local endpoints like ollama).
 
   const path = target.pathBase + (clientReq.url || '/');
   const options = {
@@ -146,10 +188,10 @@ function attempt(i, clientReq, clientRes, body) {
     upRes.on('end', () => {
       remaining -= 1;
       if (remaining > 0 && i + 1 < ATTEMPTS.length) {
-        log('key ' + k + ' on target ' + t + ' got ' + status + ' -> rotating (remaining=' + remaining + ')');
+        log(cand.label + ' got ' + status + ' -> rotating (remaining=' + remaining + ')');
         attempt(i + 1, clientReq, clientRes, body);
       } else {
-        log('key ' + k + ' on target ' + t + ' got ' + status + ' -> exhausted');
+        log(cand.label + ' got ' + status + ' -> exhausted');
         if (!clientRes.headersSent) clientRes.writeHead(status, upRes.headers);
         clientRes.end(Buffer.concat(buf));
       }
@@ -157,7 +199,7 @@ function attempt(i, clientReq, clientRes, body) {
   });
 
   upstream.on('error', (e) => {
-    log('upstream error (target ' + t + ', key ' + k + '): ' + e.message);
+    log('upstream error (' + cand.label + '): ' + e.message);
     remaining -= 1;
     if (remaining > 0 && i + 1 < ATTEMPTS.length) {
       attempt(i + 1, clientReq, clientRes, body);
@@ -175,7 +217,7 @@ server.listen(PORT, '127.0.0.1', () => {
   const actual = server.address().port;
   // Report the bound port (esp. when PORT=0) so the gateway can wire ANTHROPIC_BASE_URL.
   process.stdout.write('KEYPOOL_LISTENING_PORT=' + actual + '\n');
-  log('listening on 127.0.0.1:' + actual + ' | keys=' + KEYS.length + ' targets=' + TARGETS.length + ' attempts=' + ATTEMPTS.length);
+  log('listening on 127.0.0.1:' + actual + ' | mode=' + (USE_CANDIDATES ? 'candidates' : 'keypool') + ' attempts=' + ATTEMPTS.length);
 });
 
 // Best-effort cleanup on exit.

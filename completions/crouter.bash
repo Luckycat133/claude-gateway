@@ -26,12 +26,13 @@ _crouter_complete() {
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  cmds="list doctor add remove provider config logs uninstall help --version"
+  cmds="all list doctor add remove provider config logs uninstall help --version"
   providers="$(_crouter_providers)"
 
   if [ "$COMP_CWORD" -eq 1 ]; then
+    # Position 1 is either a subcommand or a provider name (`crouter deepseek`).
     # shellcheck disable=SC2207
-    COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
+    COMPREPLY=( $(compgen -W "$cmds $providers" -- "$cur") )
   else
     case "$prev" in
       doctor|add|remove|provider|config|logs)

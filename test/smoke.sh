@@ -35,7 +35,7 @@ ok()  { printf 'ok    %s\n' "$1"; }
 bad() { printf 'FAIL  %s\n' "$1"; fail=1; }
 
 # Legacy command names remain available as local compatibility launchers.
-for legacy in claude-minimax claude-antigravity claude-antigravity-claude; do
+for legacy in claude-minimax claude-antigravity claude-antigravity-claude claude-anthropic claude-openai claude-openrouter; do
   _out=$("$ROOT_DIR/bin/$legacy" --version 2>&1)
   _rc=$?
   if [ "$_rc" -eq 0 ] && printf '%s\n' "$_out" | grep -qE '[0-9]+\.[0-9]+\.[0-9]+'; then
@@ -295,6 +295,117 @@ if fake_gw add demo --surface bogus 2>&1 | grep -q "unknown surface"; then
   ok "add rejects unknown --surface"
 else
   bad "add accepted unknown --surface"
+fi
+
+# ---------------------------------------------------------------------------
+# Dual-source providers (anthropic / openai / openrouter)
+# ---------------------------------------------------------------------------
+for _dp in anthropic openai openrouter; do
+  if "$GATEWAY" list 2>/dev/null | grep -q "^$_dp "; then
+    ok "$_dp provider is listed"
+  else
+    bad "$_dp provider is missing from list"
+  fi
+done
+
+# anthropic/openai declare both surfaces -> AUTH column reads "dual".
+if "$GATEWAY" list 2>/dev/null | awk '$1=="anthropic"{print $(NF-1)}' | grep -q '^dual$'; then
+  ok "anthropic reports dual-source auth"
+else
+  bad "anthropic did not report dual-source auth"
+fi
+# openrouter has a single API surface -> "apikey", never "dual".
+if "$GATEWAY" list 2>/dev/null | awk '$1=="openrouter"{print $(NF-1)}' | grep -q '^apikey$'; then
+  ok "openrouter reports single api-key auth"
+else
+  bad "openrouter did not report single api-key auth"
+fi
+
+# provider show must reveal the surface layout without leaking secrets.
+_show=$("$GATEWAY" provider anthropic 2>&1)
+if printf '%s\n' "$_show" | grep -q 'default account first' &&
+   printf '%s\n' "$_show" | grep -q 'CLAUDE_CODE_OAUTH_TOKEN' &&
+   printf '%s\n' "$_show" | grep -q 'ANTHROPIC_API_KEY'; then
+  ok "provider show documents both anthropic surfaces"
+else
+  bad "provider show is missing the anthropic surface layout"
+fi
+
+# With no credentials in the environment, doctor must report MISSING (the old
+# AUTH_MODE=none default would have wrongly reported ok).
+if env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
+     CLAUDE_BIN="$MOCK_CLAUDE" "$GATEWAY" doctor anthropic 2>&1 | grep -q 'anthropic .*auth:MISSING'; then
+  ok "doctor reports MISSING for an unconfigured dual-source provider"
+else
+  bad "doctor did not report MISSING for an unconfigured dual-source provider"
+fi
+
+# openrouter must explicitly blank ANTHROPIC_API_KEY (upstream requirement).
+if "$GATEWAY" provider openrouter 2>&1 | grep -q '^  ANTHROPIC_API_KEY=$'; then
+  ok "openrouter blanks ANTHROPIC_API_KEY via EXTRA_ENV"
+else
+  bad "openrouter does not blank ANTHROPIC_API_KEY"
+fi
+
+# --- local failover proxy: bearer default -> x-api-key fallback on 429 ------
+NODE_FOR_TEST=$(command -v node 2>/dev/null || echo "")
+[ -n "$NODE_FOR_TEST" ] || NODE_FOR_TEST=$(grep -m1 '^NODE_BIN=' "$ROOT_DIR/config.sh" 2>/dev/null | cut -d'"' -f2)
+if [ -n "$NODE_FOR_TEST" ] && [ -x "$NODE_FOR_TEST" ]; then
+  _tdir=$(mktemp -d 2>/dev/null || mktemp -d -t 'crfail')
+  cat > "$_tdir/mock.js" << 'MOCKEOF'
+const http = require('http');
+const seen = [];
+const srv = http.createServer((req, res) => {
+  const auth = req.headers['authorization'] || '';
+  const xk = req.headers['x-api-key'] || '';
+  seen.push(auth ? 'bearer' : (xk ? 'x-api-key' : 'none'));
+  require('fs').writeFileSync(process.env.SEEN_FILE, seen.join(','));
+  if (auth === 'Bearer def-token' && !xk) { res.writeHead(429).end('{}'); return; }
+  if (xk === 'api-key' && !auth) { res.writeHead(200, {'content-type':'application/json'}).end('{"ok":true}'); return; }
+  res.writeHead(400).end('{"error":"unexpected headers"}');
+});
+srv.listen(0, '127.0.0.1', () => {
+  require('fs').writeFileSync(process.env.PORT_FILE, String(srv.address().port));
+});
+MOCKEOF
+  SEEN_FILE="$_tdir/seen" PORT_FILE="$_tdir/port" "$NODE_FOR_TEST" "$_tdir/mock.js" >/dev/null 2>&1 &
+  _mock_pid=$!
+  _i=0; while [ $_i -lt 30 ] && [ ! -s "$_tdir/port" ]; do sleep 0.1; _i=$((_i+1)); done
+  _mp=$(cat "$_tdir/port" 2>/dev/null)
+  if [ -n "$_mp" ]; then
+    _cands="[{\"url\":\"http://127.0.0.1:$_mp\",\"type\":\"bearer\",\"token\":\"def-token\",\"label\":\"default-account\"},{\"url\":\"http://127.0.0.1:$_mp\",\"type\":\"x-api-key\",\"token\":\"api-key\",\"label\":\"api-key\"}]"
+    KEYPOOL_CANDIDATES="$_cands" KEYPOOL_PORT=0 "$NODE_FOR_TEST" "$ROOT_DIR/bin/keypool-proxy" > "$_tdir/proxy.out" 2>/dev/null &
+    _px_pid=$!
+    _i=0; _pp=""
+    while [ $_i -lt 30 ]; do
+      _pp=$(grep -m1 '^KEYPOOL_LISTENING_PORT=' "$_tdir/proxy.out" 2>/dev/null | cut -d= -f2)
+      [ -n "$_pp" ] && break; sleep 0.1; _i=$((_i+1))
+    done
+    if [ -n "$_pp" ]; then
+      _code=$(curl -s -o "$_tdir/body" -w '%{http_code}' -X POST "http://127.0.0.1:$_pp/v1/messages" \
+        -H 'content-type: application/json' -d '{"model":"x"}' 2>/dev/null)
+      _seen=$(cat "$_tdir/seen" 2>/dev/null)
+      if [ "$_code" = "200" ]; then
+        ok "dual-source failover: 429 on default account falls back to the API key"
+      else
+        bad "dual-source failover returned HTTP $_code (expected 200)"
+      fi
+      if [ "$_seen" = "bearer,x-api-key" ]; then
+        ok "dual-source failover sends Bearer first, then x-api-key (never both)"
+      else
+        bad "dual-source failover sent the wrong header sequence: '$_seen'"
+      fi
+    else
+      bad "dual-source failover proxy did not start"
+    fi
+    kill "$_px_pid" 2>/dev/null
+  else
+    bad "dual-source failover mock upstream did not start"
+  fi
+  kill "$_mock_pid" 2>/dev/null
+  rm -rf "$_tdir"
+else
+  ok "dual-source failover test skipped (no node available)"
 fi
 
 [ "$fail" -eq 0 ] && echo "All smoke tests passed." || echo "Some smoke tests FAILED."

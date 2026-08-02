@@ -2,14 +2,20 @@
 // crouter unified gateway: a tiny, dependency-free local Anthropic-protocol
 // router. Claude Code points ANTHROPIC_BASE_URL at this gateway (one fixed
 // URL); the model name carries a provider prefix (e.g. "ollama/qwen3.5:2b",
-// "deepseek/deepseek-v4-flash") and the gateway forwards each request to the
+// "anthropic/claude-sonnet-4") and the gateway forwards each request to the
 // right backend with that backend's own auth. GET /v1/models returns the
 // combined, namespaced model catalog so Claude Code's /model can switch
 // providers live.
 //
-// This is the multi-provider generalization of bin/keypool-proxy: instead of
-// rotating keys within one provider, it routes by model prefix across
-// providers and still rotates keys on 429 for keypool-type routes.
+// Route model (v2: candidates)
+//   A route has one or more `candidates`. Each candidate is a complete auth
+//   surface: its own `url` and `auth` ({type, token}) plus optional
+//   `extra_env` (header K=V pairs). The gateway tries candidates in order and
+//   fails over to the next one on HTTP 401/429. This is what makes
+//   "preferred account first, API key fallback" work at request granularity:
+//   e.g. Anthropic's route has candidate[0] = subscription OAuth (Bearer) and
+//   candidate[1] = API key (x-api-key). Keypool providers simply list every
+//   key as its own candidate, so 429 rotation is the same mechanism.
 //
 // Env contract:
 //   CROUTER_ROUTES_FILE  path to a JSON file: an array of route objects
@@ -18,11 +24,13 @@
 //                         default "crouter"). The gateway is local-only.
 //
 // Route object:
-//   { "prefix": "ollama",
-//     "base_url": "http://localhost:11434",
-//     "auth": { "type": "none", "token": "ollama" }
-//             | { "type": "keypool", "keys": ["k1","k2"] },
-//     "models": ["qwen3.5:2b", "glm-4.7-flash"] }
+//   { "prefix": "anthropic",
+//     "base_url": "https://api.anthropic.com",
+//     "candidates": [
+//       { "url": "...", "auth": {"type":"bearer","token":"<oauth>"}, "extra_env": [] },
+//       { "url": "...", "auth": {"type":"x-api-key","token":"<key>"}, "extra_env": [] }
+//     ],
+//     "models": ["claude-sonnet-4", ...] }
 
 'use strict';
 const http = require('http');
@@ -55,25 +63,25 @@ const PORT = parseInt(process.env.CROUTER_GATEWAY_PORT || '18799', 10);
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) fail('CROUTER_GATEWAY_PORT invalid');
 const GATEWAY_TOKEN = process.env.CROUTER_GATEWAY_TOKEN || 'crouter';
 
-// Pre-parse targets.
+// Pre-parse each candidate's target.
 for (const r of ROUTES) {
-  let u;
-  try {
-    u = new URL(r.base_url);
-  } catch (e) {
-    fail('bad base_url for prefix ' + r.prefix + ': ' + r.base_url);
+  if (!Array.isArray(r.candidates) || r.candidates.length === 0) {
+    fail('route ' + r.prefix + ' has no candidates');
   }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') fail('only http/https: ' + r.base_url);
-  r._proto = u.protocol;
-  r._host = u.hostname;
-  r._port = u.port || (u.protocol === 'https:' ? 443 : 80);
-  r._pathBase = u.pathname.replace(/\/+$/, '');
-  r.auth = r.auth || { type: 'none', token: '' };
-  if (r.auth.type === 'keypool') {
-    r.auth.keys = (r.auth.keys || []).filter(Boolean);
-    if (r.auth.keys.length === 0) fail('keypool route ' + r.prefix + ' has no keys');
+  for (const c of r.candidates) {
+    let u;
+    try {
+      u = new URL(c.url);
+    } catch (e) {
+      fail('bad candidate url for ' + r.prefix + ': ' + c.url);
+    }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') fail('only http/https: ' + c.url);
+    c._proto = u.protocol;
+    c._host = u.hostname;
+    c._port = u.port || (u.protocol === 'https:' ? 443 : 80);
+    c._pathBase = u.pathname.replace(/\/+$/, '');
+    c.auth = c.auth || { type: 'none', token: '' };
   }
-  r.models = r.models || [];
 }
 
 function routeByPrefix(prefix) {
@@ -82,6 +90,41 @@ function routeByPrefix(prefix) {
 
 function log(msg) {
   process.stderr.write('crouter-gateway: ' + msg + '\n');
+}
+
+// ---- header construction per candidate -----------------------------------
+function buildHeaders(cand, clientReq) {
+  const headers = {};
+  for (const [h, v] of Object.entries(clientReq.headers)) {
+    const lh = h.toLowerCase();
+    if (lh === 'host' || lh === 'connection' || lh === 'proxy-connection') continue;
+    if (lh === 'authorization' || lh === 'x-api-key') continue; // gateway sets auth
+    headers[h] = v;
+  }
+  const a = cand.auth;
+  if (a.type === 'none') {
+    // Ollama-style: a dummy token (value ignored by backend) + optional extra_env.
+    // Never send an empty credential header — some servers drop empty values.
+    const tok = a.token || 'crouter';
+    headers['anthropic-auth-token'] = tok;
+    headers['x-api-key'] = tok;
+    for (const kv of cand.extra_env || []) {
+      const i = kv.indexOf('=');
+      if (i < 0) continue;
+      const h = kv.slice(0, i);
+      const lh = h.toLowerCase();
+      if (lh === 'host' || lh === 'connection' || lh === 'content-length' || lh === 'transfer-encoding') continue;
+      headers[h] = kv.slice(i + 1);
+    }
+  } else if (a.type === 'x-api-key') {
+    headers['x-api-key'] = a.token;
+  } else if (a.type === 'bearer') {
+    headers['authorization'] = 'Bearer ' + a.token;
+  }
+  // Body is rewritten (model prefix stripped); drop content-length and let Node recompute.
+  delete headers['content-length'];
+  delete headers['transfer-encoding'];
+  return headers;
 }
 
 // ---- GET /v1/models -------------------------------------------------------
@@ -137,118 +180,67 @@ function handleMessage(clientReq, clientRes) {
     if (!route) {
       clientRes.writeHead(400, { 'content-type': 'application/json' });
       clientRes.end(
-        JSON.stringify({
-          error: { type: 'unknown_provider', message: 'no such provider prefix: ' + prefix },
-        })
+        JSON.stringify({ error: { type: 'unknown_provider', message: 'no such provider prefix: ' + prefix } })
       );
       return;
     }
     // Rewrite the model to the backend's bare name, then forward.
     parsed.model = realModel;
     const newBody = Buffer.from(JSON.stringify(parsed), 'utf8');
-    if (route.auth.type === 'keypool') {
-      forwardKeypool(route, clientReq, clientRes, newBody);
-    } else {
-      forwardOnce(route, route.auth.token || '', clientReq, clientRes, newBody, 0);
+
+    // Try candidates in order; fail over on 401/429 or upstream error.
+    function tryCand(idx) {
+      if (idx >= route.candidates.length) {
+        if (!clientRes.headersSent) {
+          clientRes.writeHead(502, { 'content-type': 'application/json' });
+          clientRes.end(
+            JSON.stringify({
+              error: { type: 'all_candidates_failed', message: 'all auth candidates for ' + prefix + ' failed' },
+            })
+          );
+        }
+        return;
+      }
+      const cand = route.candidates[idx];
+      const headers = buildHeaders(cand, clientReq);
+      const path = cand._pathBase + (clientReq.url || '/');
+      const options = {
+        protocol: cand._proto,
+        host: cand._host,
+        port: cand._port,
+        method: clientReq.method,
+        path: path,
+        headers: headers,
+      };
+      const transport = cand._proto === 'https:' ? https : http;
+      const up = transport.request(options, (upRes) => {
+        const transient = upRes.statusCode === 401 || upRes.statusCode === 429;
+        if (transient && idx + 1 < route.candidates.length) {
+          log('candidate ' + idx + ' on ' + prefix + ' got ' + upRes.statusCode + ' -> failing over');
+          upRes.resume(); // drain, do not pipe
+          tryCand(idx + 1);
+          return;
+        }
+        if (!clientRes.headersSent) clientRes.writeHead(upRes.statusCode, upRes.headers);
+        upRes.pipe(clientRes);
+      });
+      up.on('error', (e) => {
+        log('upstream error (' + prefix + ' cand ' + idx + '): ' + e.message);
+        if (idx + 1 < route.candidates.length) {
+          tryCand(idx + 1);
+        } else if (!clientRes.headersSent) {
+          clientRes.writeHead(502, { 'content-type': 'application/json' });
+          clientRes.end(JSON.stringify({ error: { type: 'upstream_error', message: e.message } }));
+        }
+      });
+      if (newBody && newBody.length) up.write(newBody);
+      up.end();
     }
+    tryCand(0);
   });
   clientReq.on('error', () => {
     if (!clientRes.headersSent) clientRes.writeHead(400).end('client error');
   });
-}
-
-// Forward once with a given auth token (none-type routes).
-function forwardOnce(route, token, clientReq, clientRes, body, attemptIdx) {
-  const headers = {};
-  for (const [h, v] of Object.entries(clientReq.headers)) {
-    const lh = h.toLowerCase();
-    if (lh === 'host' || lh === 'connection' || lh === 'proxy-connection') continue;
-    if (route.auth.type === 'none' && (lh === 'authorization' || lh === 'x-api-key')) continue;
-    headers[h] = v;
-  }
-  if (route.auth.type === 'none') {
-    // Ollama-style: a dummy ANTHROPIC_AUTH_TOKEN (value ignored by backend).
-    headers['anthropic-auth-token'] = token || 'ollama';
-    headers['x-api-key'] = token || 'ollama';
-    // Mirror launch.sh: forward every EXTRA_ENV pair as a header too.
-    for (const kv of route.auth.extra_env || []) {
-      const i = kv.indexOf('=');
-      if (i < 0) continue;
-      const h = kv.slice(0, i);
-      const lh = h.toLowerCase();
-      if (lh === 'host' || lh === 'connection' || lh === 'content-length' || lh === 'transfer-encoding') continue;
-      headers[h] = kv.slice(i + 1);
-    }
-  }
-  // The body is rewritten (model prefix stripped), so its length differs from
-  // the client's content-length. Drop it and let Node recompute.
-  delete headers['content-length'];
-  delete headers['transfer-encoding'];
-  relay(route, headers, clientReq, clientRes, body, attemptIdx);
-}
-
-// Keypool-type route: rotate keys on 429/401.
-function forwardKeypool(route, clientReq, clientRes, body) {
-  const keys = route.auth.keys;
-  let idx = 0;
-  function tryNext() {
-    if (idx >= keys.length) {
-      clientRes.writeHead(502, { 'content-type': 'application/json' });
-      clientRes.end(JSON.stringify({ error: { type: 'keypool_exhausted', message: 'all keys exhausted' } }));
-      return;
-    }
-    const key = keys[idx];
-    const headers = {};
-    for (const [h, v] of Object.entries(clientReq.headers)) {
-      const lh = h.toLowerCase();
-      if (lh === 'host' || lh === 'connection' || lh === 'proxy-connection' || lh === 'authorization' || lh === 'x-api-key') continue;
-      headers[h] = v;
-    }
-    headers['x-api-key'] = key;
-    headers['authorization'] = 'Bearer ' + key;
-    delete headers['content-length'];
-    delete headers['transfer-encoding'];
-    relay(route, headers, clientReq, clientRes, body, idx, (status) => {
-      const transient = status === 429 || status === 401;
-      if (transient) {
-        log('key ' + idx + ' on ' + route.prefix + ' got ' + status + ' -> rotating');
-        idx += 1;
-        tryNext();
-        return true; // consumed; relay should not pipe
-      }
-      return false;
-    });
-  }
-  tryNext();
-}
-
-// Core relay. onTransient(status) -> true means the caller handled retry and
-// relay must NOT pipe the (transient) response.
-function relay(route, headers, clientReq, clientRes, body, attemptIdx, onTransient) {
-  const path = route._pathBase + (clientReq.url || '/');
-  const options = {
-    protocol: route._proto,
-    host: route._host,
-    port: route._port,
-    method: clientReq.method,
-    path: path,
-    headers: headers,
-  };
-  const transport = route._proto === 'https:' ? https : http;
-  const upstream = transport.request(options, (upRes) => {
-    if (onTransient && onTransient(upRes.statusCode)) return;
-    if (!clientRes.headersSent) clientRes.writeHead(upRes.statusCode, upRes.headers);
-    upRes.pipe(clientRes);
-  });
-  upstream.on('error', (e) => {
-    log('upstream error (' + route.prefix + '): ' + e.message);
-    if (!clientRes.headersSent) {
-      clientRes.writeHead(502, { 'content-type': 'application/json' });
-      clientRes.end(JSON.stringify({ error: { type: 'upstream_error', message: e.message } }));
-    }
-  });
-  if (body && body.length) upstream.write(body);
-  upstream.end();
 }
 
 const server = http.createServer((req, res) => {
@@ -267,8 +259,10 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   const actual = server.address().port;
   process.stdout.write('CROUTER_GATEWAY_LISTENING_PORT=' + actual + '\n');
-  log('listening on 127.0.0.1:' + actual + ' | providers=' + ROUTES.map((r) => r.prefix).join(',') +
-    ' | models=' + ROUTES.reduce((a, r) => a + r.models.length, 0));
+  log(
+    'listening on 127.0.0.1:' + actual + ' | providers=' + ROUTES.map((r) => r.prefix).join(',') +
+      ' | models=' + ROUTES.reduce((a, r) => a + r.models.length, 0)
+  );
 });
 
 function shutdown() {

@@ -11,6 +11,9 @@ crouter/
 ├── bin/
 │   └── crouter             # The only entry point
 ├── providers/
+│   ├── anthropic.sh               # Anthropic Claude (subscription OAuth -> API key)
+│   ├── openai.sh                  # OpenAI GPT via the Anthropic-compatible Messages API
+│   ├── openrouter.sh              # OpenRouter unified gateway
 │   ├── minimax.sh                 # MiniMax M3 (China endpoint)
 │   ├── deepseek.sh                # DeepSeek V4 (Flash/Pro) via /anthropic endpoint
 │   ├── antigravity.sh             # Gemini via local Antigravity proxy
@@ -84,7 +87,10 @@ crouter all                           # start the unified gateway + Claude Code
   enriched from `ollama list`, so locally-pulled models appear in `/model`.
 - Each request is routed by prefix to the right backend with that backend's own
   auth (Keychain keys for MiniMax/DeepSeek, the static token for Antigravity,
-  the dummy token for Ollama). Keypool providers still rotate keys on 429.
+  the dummy token for Ollama). Every route holds an ordered list of *candidates*
+  and fails over to the next one on **401/429**, per request: keypool providers
+  list one candidate per key, dual-source providers list the default account
+  first and the API key second.
 - The gateway listens on `127.0.0.1:${CROUTER_GATEWAY_PORT:-18799}` by default;
   override with `CROUTER_GATEWAY_PORT`. It is reaped automatically when Claude
   Code exits.
@@ -141,6 +147,44 @@ HEALTH_CHECK_URL=""                         # used by status/doctor
 | `static` | The literal (non-secret) token | `local-antigravity-proxy` |
 | `none` | No credential injected | |
 | `keypool` | Space-separated Keychain service names (`AUTH_KEYS`); a local proxy rotates across them on 429/401 | `codex-minimax-token-plan` |
+
+## Dual-source providers: default account first, API key as fallback
+
+`anthropic`, `openai` and `openrouter` do not use `AUTH_MODE`. They declare up to
+two *credential surfaces* and crouter always spends the **default account's
+included quota first**, falling back to the metered API key on **401/429**:
+
+```sh
+# --- preferred "default account" (tried FIRST) ---
+DEFAULT_URL="https://api.anthropic.com"
+DEFAULT_AUTH_TYPE="bearer"                  # sent as Authorization: Bearer
+DEFAULT_TOKEN_ENV="CLAUDE_CODE_OAUTH_TOKEN"
+DEFAULT_TOKEN_ENV_FALLBACK="ANTHROPIC_AUTH_TOKEN"   # optional second env name
+
+# --- fallback API surface ---
+API_URL="https://api.anthropic.com"
+API_AUTH_TYPE="x-api-key"                   # sent as x-api-key
+API_KEY_ENV="ANTHROPIC_API_KEY"
+API_KEY_REF="anthropic-api-key"             # optional macOS Keychain service
+```
+
+The two surfaces may use **different URLs and different header shapes**. This
+matters: an Anthropic subscription OAuth token is only valid as
+`Authorization: Bearer` — sending it as `x-api-key` gets it rejected. crouter
+never sends both headers for a dual-source provider.
+
+Rotation is real, not just a start-up choice:
+
+* **`crouter <provider>`** — when both surfaces are configured, crouter fronts
+  them with `bin/keypool-proxy` (candidate mode) and points Claude Code at it,
+  so a 401/429 rotates to the API key **mid-session**. With only one surface
+  configured it connects directly, with no proxy overhead.
+* **`crouter all`** — each surface becomes a candidate on that provider's route
+  and the unified gateway fails over per request.
+
+`crouter list` shows `dual` (both surfaces declared) or `apikey` (single
+surface); `crouter doctor` reports which credentials are actually live, e.g.
+`auth:ok(default+api)`.
 
 ## Key pool & automatic failover
 
@@ -207,6 +251,78 @@ other `AUTH_MODE`. The provider must be in `AUTH_MODE="keypool"` for
 `add` / `rotate` / `remove`; the gateway refuses otherwise.
 
 ## Providers
+
+### Anthropic Claude
+
+Endpoint `https://api.anthropic.com`, default `claude-sonnet-4`, 200k context.
+This is a [dual-source provider](#dual-source-providers-default-account-first-api-key-as-fallback):
+your **Claude subscription (Pro/Max) OAuth token is spent first**, and the
+metered Console API key only takes over on 401/429.
+
+```sh
+# 1) Default account — subscription quota (preferred).
+#    `claude setup-token` mints a long-lived OAuth token for your logged-in plan.
+export CLAUDE_CODE_OAUTH_TOKEN="$(claude setup-token)"   # or reuse ANTHROPIC_AUTH_TOKEN
+
+# 2) Fallback — Console API key, billed per token. Keychain keeps it out of your rc file.
+read -s "ANTHROPIC_KEY?Paste Anthropic API key: "; echo
+security add-generic-password -U -a "$USER" -s "anthropic-api-key" -w "$ANTHROPIC_KEY"
+unset ANTHROPIC_KEY
+
+crouter doctor anthropic     # -> anthropic  auth:ok(default+api)
+crouter anthropic
+```
+
+| Claude Code selection | Model |
+| --- | --- |
+| Default, `/model sonnet`, subagents | `claude-sonnet-4` |
+| `/model opus` | `claude-opus-4-5` |
+| `/model haiku` | `claude-haiku-4` |
+
+Configure only one of the two and crouter connects directly to it — the failover
+proxy is only started when both are present.
+
+### OpenAI GPT
+
+Endpoint `https://api.openai.com/v1/messages` (OpenAI's Anthropic-compatible
+Messages API), default `gpt-4o`, 128k context. Also dual-source, but the
+"default account" here is an **optional** gateway you point at yourself — e.g. an
+org proxy or a pooled-quota endpoint. Leave it unset to go straight to the key.
+
+```sh
+# Fallback (usually all you need):
+read -s "OPENAI_KEY?Paste OpenAI API key: "; echo
+security add-generic-password -U -a "$USER" -s "openai-api-key" -w "$OPENAI_KEY"
+unset OPENAI_KEY
+
+# Optional preferred surface, spent before the metered key:
+export OPENAI_DEFAULT_URL="https://my-org-gateway.example.com/v1/messages"
+export OPENAI_DEFAULT_TOKEN="..."
+
+crouter openai
+```
+
+Verify your key actually has access to the Messages API before relying on it —
+`/v1/messages` is newer than the classic `/v1/chat/completions` surface.
+
+### OpenRouter
+
+Endpoint `https://openrouter.ai/api/v1`, default `anthropic/claude-sonnet-4`.
+Single auth surface (Bearer), so `crouter list` shows `apikey`, not `dual`.
+
+```sh
+read -s "OPENROUTER_KEY?Paste OpenRouter API key: "; echo
+security add-generic-password -U -a "$USER" -s "openrouter-api-key" -w "$OPENROUTER_KEY"
+unset OPENROUTER_KEY
+
+crouter openrouter
+```
+
+The provider sets `ANTHROPIC_API_KEY=` (empty) in `EXTRA_ENV`, as OpenRouter's
+Claude Code integration guide requires — a leftover Anthropic key otherwise
+conflicts with the OpenRouter token. Model IDs keep their vendor prefix, so under
+`crouter all` they read `openrouter/anthropic/claude-sonnet-4` (the gateway only
+strips the first path segment).
 
 ### MiniMax Token Plan
 

@@ -4,6 +4,28 @@ All notable changes to this local setup are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-08-02
+
+### Added
+- Three new providers: **`anthropic`** (Anthropic Claude, `https://api.anthropic.com`, default `claude-sonnet-4`), **`openai`** (GPT via OpenAI's Anthropic-compatible `https://api.openai.com/v1/messages`, default `gpt-4o`), and **`openrouter`** (`https://openrouter.ai/api/v1`, default `anthropic/claude-sonnet-4`, with the mandatory empty `ANTHROPIC_API_KEY` in `EXTRA_ENV`).
+- **Dual-source auth: default account first, API key as fallback.** `anthropic` and `openai` declare two credential surfaces instead of a single `AUTH_MODE` — `DEFAULT_URL`/`DEFAULT_AUTH_TYPE`/`DEFAULT_TOKEN_ENV`(`_FALLBACK`) for the preferred account and `API_URL`/`API_AUTH_TYPE`/`API_KEY_ENV`/`API_KEY_REF` for the metered key. crouter always spends the default account's included quota first and rotates to the API key on **401/429**. For `anthropic` the default account is the Claude subscription OAuth token (`claude setup-token` → `CLAUDE_CODE_OAUTH_TOKEN`, or `ANTHROPIC_AUTH_TOKEN`); for `openai` it is an optional self-configured gateway (`OPENAI_DEFAULT_URL` / `OPENAI_DEFAULT_TOKEN`).
+- Rotation works in **both** launch paths, not just at start-up: `crouter <provider>` fronts the two surfaces with `bin/keypool-proxy` in the new **candidate mode** (`KEYPOOL_CANDIDATES` JSON, per-candidate URL + header shape), and `crouter all` makes each surface a candidate on the provider's route. With only one surface configured, the direct connection is used and no proxy is started.
+- `crouter list` reports `dual` / `apikey` for these providers; `crouter doctor` reports which credentials are actually live (`auth:ok(default+api)`); `crouter provider <name>` prints the full surface layout (URLs, header types, env/keychain names) with no secrets.
+
+### Changed
+- `bin/gateway` routes now hold an ordered `candidates[]` array (each with its own `url`, `auth{type,token}` and `extra_env`) instead of a single `auth` object. Failing over on 401/429 is now one mechanism shared by keypool key rotation and dual-source fallback; keypool routes simply list every key as its own candidate.
+- `install.sh` derives the `claude-<provider>` compatibility shortcuts from the contents of `providers/`, so adding a provider no longer requires editing the install script. Repo-local `bin/claude-*` symlinks added for `ollama`, `anthropic`, `openai`, `openrouter`.
+- Shell completions now offer provider names (and `all`) at the first argument position, not only the subcommand verbs.
+
+### Fixed
+- **Auth header shape is no longer guessed.** `lib/launch.sh` used to export *both* `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` with the same value. An Anthropic subscription OAuth token is only valid as `Authorization: Bearer`, so sending it as `x-api-key` gets it rejected. Dual-source providers now set `_AUTH_SCHEME` during resolution and only the matching env var is injected; legacy providers keep the previous both-headers behavior.
+- `load_provider()` did not reset `AUTH_KEYS`, `PLUS_URL`, `PLUS_KEYS`, `EFFORT` or any of the new dual-source variables, so values leaked between providers when several were loaded in one shell (`crouter doctor`, `crouter all`). All optional contract fields are now cleared before sourcing.
+- `check_auth()` returned "ok" for dual-source providers with no credentials at all (they default to `AUTH_MODE=none`). It now requires at least one usable surface.
+- `bin/keypool-proxy` / `bin/gateway` no longer send an empty credential header when a `none`-auth route has no dummy token.
+
+### Verified
+- `test/smoke.sh` extended to 29 checks, including a real end-to-end failover run against a mock upstream: the proxy sends `Authorization: Bearer` first, receives 429, then retries with `x-api-key` only and gets HTTP 200 — asserting the exact header sequence `bearer,x-api-key` (never both on one request). The same failover was verified through `bin/gateway`, and all four direct-launch permutations (both surfaces / default only / API key only / none) were checked against a stub `claude` binary.
+
 ## [0.4.8] - 2026-08-02
 
 ### Fixed

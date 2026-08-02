@@ -47,6 +47,109 @@ resolve_auth() {
   esac
 }
 
+# ---------------------------------------------------------------------------
+# Dual-source providers (anthropic/openai/openrouter): a preferred "default
+# account" (subscription OAuth or a configured gateway) tried first, with the
+# official API key as fallback. Both surfaces are declared via DEFAULT_*/API_*
+# vars in the provider file.
+#
+# resolve_dual_source() discovers BOTH surfaces and exports:
+#   _DUAL_DEF_TOKEN / _DUAL_API_TOKEN   raw credentials (may be empty)
+#   _DUAL_COUNT                         how many surfaces are usable (1 or 2)
+#   AUTH_TOKEN / BASE_URL / _AUTH_SCHEME  the single best surface (direct launch)
+# When both are present, start_dual_failover() fronts them with the local proxy
+# so rotation on 401/429 happens mid-session, exactly like the unified gateway.
+# ---------------------------------------------------------------------------
+is_dual_source() {
+  [ -n "${DEFAULT_TOKEN_ENV:-}" ] || [ -n "${API_KEY_ENV:-}" ] || [ -n "${API_KEY_REF:-}" ]
+}
+
+resolve_dual_source() {
+  AUTH_TOKEN=""
+  _AUTH_SCHEME="x-api-key"
+  _DUAL_DEF_TOKEN=""
+  _DUAL_API_TOKEN=""
+  _DUAL_COUNT=0
+
+  # Preferred "default account" (subscription OAuth / configured gateway).
+  if [ -n "${DEFAULT_TOKEN_ENV:-}" ]; then
+    if [ -n "$(printenv "$DEFAULT_TOKEN_ENV" 2>/dev/null)" ]; then
+      _DUAL_DEF_TOKEN=$(printenv "$DEFAULT_TOKEN_ENV")
+    elif [ -n "${DEFAULT_TOKEN_ENV_FALLBACK:-}" ] && [ -n "$(printenv "$DEFAULT_TOKEN_ENV_FALLBACK" 2>/dev/null)" ]; then
+      _DUAL_DEF_TOKEN=$(printenv "$DEFAULT_TOKEN_ENV_FALLBACK")
+    fi
+  fi
+  # Fallback API key (env first, then keychain).
+  if [ -n "${API_KEY_ENV:-}" ] && [ -n "$(printenv "$API_KEY_ENV" 2>/dev/null)" ]; then
+    _DUAL_API_TOKEN=$(printenv "$API_KEY_ENV")
+  elif [ -n "${API_KEY_REF:-}" ]; then
+    _DUAL_API_TOKEN=$(security find-generic-password -a "$USER" -s "$API_KEY_REF" -w 2>/dev/null)
+  fi
+
+  [ -n "$_DUAL_DEF_TOKEN" ] && _DUAL_COUNT=$((_DUAL_COUNT + 1))
+  [ -n "$_DUAL_API_TOKEN" ] && _DUAL_COUNT=$((_DUAL_COUNT + 1))
+
+  if [ -n "$_DUAL_DEF_TOKEN" ]; then
+    AUTH_TOKEN="$_DUAL_DEF_TOKEN"
+    [ -n "${DEFAULT_URL:-}" ] && BASE_URL="$DEFAULT_URL"
+    _AUTH_SCHEME="${DEFAULT_AUTH_TYPE:-bearer}"
+    return 0
+  fi
+  if [ -n "$_DUAL_API_TOKEN" ]; then
+    AUTH_TOKEN="$_DUAL_API_TOKEN"
+    [ -n "${API_URL:-}" ] && BASE_URL="$API_URL"
+    _AUTH_SCHEME="${API_AUTH_TYPE:-x-api-key}"
+    return 0
+  fi
+  die "no auth configured for dual-source provider '$PROVIDER_NAME' (set ${DEFAULT_TOKEN_ENV:-<default token env>} / ${API_KEY_ENV:-<api key env>}, or keychain ${API_KEY_REF:-<none>})"
+}
+
+# Front both surfaces with the local failover proxy so that a 401/429 on the
+# default account rotates to the API key mid-session (no restart needed).
+# Requires resolve_dual_source() to have run. No-op unless both are available.
+start_dual_failover() {
+  [ "${_DUAL_COUNT:-0}" -ge 2 ] || return 0
+  if [ -z "$NODE_BIN" ]; then
+    info "warn: node not found; dual-source failover disabled (using default account only)"
+    return 0
+  fi
+
+  _cands=$(
+    DEF_URL="${DEFAULT_URL:-$BASE_URL}" DEF_TYPE="${DEFAULT_AUTH_TYPE:-bearer}" DEF_TOKEN="$_DUAL_DEF_TOKEN" \
+    AP_URL="${API_URL:-$BASE_URL}" AP_TYPE="${API_AUTH_TYPE:-x-api-key}" AP_TOKEN="$_DUAL_API_TOKEN" \
+    "$NODE_BIN" -e '
+      const c=[];
+      if(process.env.DEF_TOKEN) c.push({url:process.env.DEF_URL, type:process.env.DEF_TYPE, token:process.env.DEF_TOKEN, label:"default-account"});
+      if(process.env.AP_TOKEN) c.push({url:process.env.AP_URL, type:process.env.AP_TYPE, token:process.env.AP_TOKEN, label:"api-key"});
+      process.stdout.write(JSON.stringify(c));
+    '
+  )
+
+  _out=$(mktemp -t dualpool.XXXXXX)
+  KEYPOOL_CANDIDATES="$_cands" KEYPOOL_PORT=0 \
+    "$NODE_BIN" "$BIN_DIR/keypool-proxy" > "$_out" 2>/dev/null &
+  KEYPOOL_PID=$!
+
+  _lp=""
+  _i=0
+  while [ $_i -lt 30 ]; do
+    _lp=$(grep -m1 '^KEYPOOL_LISTENING_PORT=' "$_out" 2>/dev/null | cut -d= -f2)
+    [ -n "$_lp" ] && break
+    sleep 0.1
+    _i=$((_i + 1))
+  done
+  rm -f "$_out"
+  if [ -z "$_lp" ]; then
+    kill "$KEYPOOL_PID" 2>/dev/null
+    KEYPOOL_PID=""
+    info "warn: dual-source failover proxy failed to start; using default account only"
+    return 0
+  fi
+  KEYPOOL_URL="http://127.0.0.1:$_lp"
+  export KEYPOOL_URL KEYPOOL_PID
+  info "auth: default account first, API key on 401/429 (local failover on $KEYPOOL_URL)"
+}
+
 # keypool: resolve a pool of keys from keychain, start a local key-failover proxy,
 # and expose its URL. Claude Code then talks to the proxy, which rotates keys on
 # 429/401 so quota exhaustion is handled transparently (mid-session).
@@ -119,8 +222,31 @@ start_keypool() {
   info "keypool: proxy on $KEYPOOL_URL$_note"
 }
 
+# Which dual-source surfaces are currently usable. Prints e.g. "default+api",
+# "default", "api", or nothing. Never prints the secrets themselves.
+dual_source_state() {
+  _s=""
+  if [ -n "${DEFAULT_TOKEN_ENV:-}" ]; then
+    if [ -n "$(printenv "$DEFAULT_TOKEN_ENV" 2>/dev/null)" ] ||
+       { [ -n "${DEFAULT_TOKEN_ENV_FALLBACK:-}" ] && [ -n "$(printenv "$DEFAULT_TOKEN_ENV_FALLBACK" 2>/dev/null)" ]; }; then
+      _s="default"
+    fi
+  fi
+  if [ -n "${API_KEY_ENV:-}" ] && [ -n "$(printenv "$API_KEY_ENV" 2>/dev/null)" ]; then
+    _s="${_s:+$_s+}api"
+  elif [ -n "${API_KEY_REF:-}" ] && security find-generic-password -a "$USER" -s "$API_KEY_REF" >/dev/null 2>&1; then
+    _s="${_s:+$_s+}api"
+  fi
+  printf '%s' "$_s"
+}
+
 # Non-destructive availability check used by status/doctor (never prints secrets).
 check_auth() {
+  # Dual-source providers don't use AUTH_MODE; at least one surface must exist.
+  if is_dual_source; then
+    [ -n "$(dual_source_state)" ]
+    return $?
+  fi
   case $AUTH_MODE in
     keychain)
       _st=$(_kc_state "$AUTH_REFERENCE")

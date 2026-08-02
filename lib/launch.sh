@@ -52,14 +52,30 @@ launch_claude() {
   set -- "ANTHROPIC_MODEL=$_main_model" "$@"
   [ -n "$CONTEXT_TOKENS" ] && set -- "CLAUDE_CODE_MAX_CONTEXT_TOKENS=$CONTEXT_TOKENS" "$@"
 
-  if [ "${AUTH_MODE:-}" = "keypool" ] && [ "$_bypass" -eq 0 ]; then
-    [ -n "${KEYPOOL_URL:-}" ] || die "keypool proxy not started"
+  # A local proxy (keypool rotation or dual-source failover) owns auth: Claude
+  # Code just talks to it with a placeholder credential.
+  if [ -n "${KEYPOOL_URL:-}" ] && [ "$_bypass" -eq 0 ]; then
     set -- "ANTHROPIC_BASE_URL=$KEYPOOL_URL" "$@"
     set -- "ANTHROPIC_API_KEY=keypool-local" "$@"
     set -- "ANTHROPIC_AUTH_TOKEN=keypool-local" "$@"
+  elif [ "${AUTH_MODE:-}" = "keypool" ] && [ "$_bypass" -eq 0 ]; then
+    die "keypool proxy not started"
   elif [ -n "$AUTH_TOKEN" ]; then
-    set -- "ANTHROPIC_API_KEY=$AUTH_TOKEN" "$@"
-    set -- "ANTHROPIC_AUTH_TOKEN=$AUTH_TOKEN" "$@"
+    # Header shape matters. `_AUTH_SCHEME` is set by resolve_dual_source():
+    #   bearer     -> Authorization: Bearer  (Anthropic subscription OAuth,
+    #                 OpenRouter, OpenAI-compatible gateways). Sending such a
+    #                 token as x-api-key gets it rejected upstream.
+    #   x-api-key  -> x-api-key              (Anthropic Console API key)
+    # Legacy providers leave it unset: keep the historical both-headers behavior.
+    case "${_AUTH_SCHEME:-both}" in
+      bearer)
+        set -- "ANTHROPIC_AUTH_TOKEN=$AUTH_TOKEN" "$@" ;;
+      x-api-key)
+        set -- "ANTHROPIC_API_KEY=$AUTH_TOKEN" "$@" ;;
+      *)
+        set -- "ANTHROPIC_API_KEY=$AUTH_TOKEN" "$@"
+        set -- "ANTHROPIC_AUTH_TOKEN=$AUTH_TOKEN" "$@" ;;
+    esac
   fi
   set -- "ANTHROPIC_BASE_URL=${KEYPOOL_URL:-$BASE_URL}" "$@"
 
@@ -72,7 +88,7 @@ launch_claude() {
   set -- "USER=$USER" "$@"
   set -- "HOME=$HOME" "$@"
 
-  if [ "${AUTH_MODE:-}" = "keypool" ] && [ "$_bypass" -eq 0 ]; then
+  if [ -n "${KEYPOOL_PID:-}" ] && [ "$_bypass" -eq 0 ]; then
     # Run as a child (not exec) so we can reap the proxy on exit.
     env -i "$@" &
     _cg_pid=$!
