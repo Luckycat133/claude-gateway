@@ -7,6 +7,9 @@ All notable changes to this local setup are documented in this file.
 ### Changed
 - Deduplicated the four compatibility launchers (`bin/claude-minimax`, `claude-antigravity`, `claude-deepseek`, `claude-antigravity-claude`) into a single shared `bin/crouter-compat` that derives the provider from the invoked name (strips the `claude-` prefix). The four launchers are now symlinks to it, eliminating ~45 lines of duplicated symlink-resolution boilerplate. `install.sh` links each shortcut to `crouter-compat`.
 
+### Internal
+- Extracted the cross-provider helper logic out of the ~900-line `bin/crouter` into sourced `lib/` modules with no behavior change: `lib/provider.sh` (provider lookup/load with contract reset), `lib/auth.sh` (keychain state, keypool start/check, health), `lib/key-mgmt.sh` (key add/remove/list + keychain I/O), and `lib/launch.sh` (the `env -i` isolated Claude Code launch, incl. keypool vs direct-auth branches, effort injection, and `EXTRA_ENV`). `bin/crouter` now sources these four modules and drops from ~906 to ~405 lines. Verified equivalent via `test/smoke.sh` and a dedicated launch-env harness (alias/model vars, `EXTRA_ENV`, minimal terminal env, and keypool `keypool-local` creds all match the previous inline code).
+
 ## [0.4.4] - 2026-08-02
 
 ### Changed

@@ -177,8 +177,9 @@ chmod +x "$GATEWAY_SH"
 # overriding PROVIDERS_DIR via env. The gateway computes PROVIDERS_DIR
 # from ROOT_DIR, so we use a tiny custom gateway copy rooted at FAKE_ROOT.
 FAKE_ROOT="$MOCK_DIR/repo"
-mkdir -p "$FAKE_ROOT/bin" "$FAKE_ROOT/providers"
+mkdir -p "$FAKE_ROOT/bin" "$FAKE_ROOT/providers" "$FAKE_ROOT/lib"
 cp "$GATEWAY" "$FAKE_ROOT/bin/crouter"
+cp "$ROOT_DIR/lib/"*.sh "$FAKE_ROOT/lib/" 2>/dev/null || true
 cp "$FAKE_PROVIDERS_DIR/demo.sh" "$FAKE_ROOT/providers/demo.sh"
 printf '0.4.0\n' > "$FAKE_ROOT/VERSION"
 
