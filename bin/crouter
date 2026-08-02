@@ -3,6 +3,7 @@
 #
 # Usage:
 #   crouter <provider> [<model>] [claude args...]   Launch (optional positional model)
+#   crouter all                           Unified gateway: one URL, switch providers via /model
 #   crouter list                          List available providers
 #   crouter doctor [provider]             Run environment diagnostics
 #   crouter add <provider>                Add a key to a provider's keychain keypool
@@ -400,6 +401,125 @@ cmd_uninstall() {
   done
 }
 
+# ---------------------------------------------------------------------------
+# Unified gateway: crouter all
+# Starts a single local Anthropic-protocol gateway that fronts every provider.
+# Claude Code points at one fixed URL; the model name carries a "<provider>/"
+# prefix and the gateway routes to the right backend with that backend's auth.
+# GET /v1/models returns the combined, namespaced catalog so /model can switch
+# providers live. Each provider's separate command (crouter ollama, etc.) is
+# untouched and still launches directly.
+# ---------------------------------------------------------------------------
+
+# Build a routes JSON file covering every provider. Prints the temp file path.
+build_all_routes() {
+  _rt=$(mktemp -t call-routes.XXXXXX)
+  for _n in $(provider_names); do
+    (
+      load_provider "$_n"
+      _keys=""
+      case "$AUTH_MODE" in
+        none) _token="" ;;
+        static) _keys="${AUTH_REFERENCE:-}"; _token="" ;;
+        keychain) _keys=$(security find-generic-password -a "$USER" -s "${AUTH_REFERENCE:-}" -w 2>/dev/null); _token="" ;;
+    keypool)
+      _pool=""
+      for _ref in ${AUTH_KEYS:-} ${PLUS_KEYS:-}; do
+        _t=$(security find-generic-password -a "$USER" -s "$_ref" -w 2>/dev/null)
+        [ -n "$_t" ] && _pool="$_pool $_t"
+      done
+      _keys=$(echo "$_pool" | sed 's/^ *//; s/ *$//')
+      _token=""
+      ;;
+        *) _token="" ;;
+      esac
+      # none-mode providers carry a dummy token in EXTRA_ENV (e.g. ollama).
+      _te=""
+      if [ "$AUTH_MODE" = "none" ]; then
+        _ifs="$IFS"; IFS=';'
+        for _kv in ${EXTRA_ENV:-}; do
+          case "$_kv" in ANTHROPIC_AUTH_TOKEN=*) _te=${_kv#ANTHROPIC_AUTH_TOKEN=} ;; esac
+        done
+        IFS="$_ifs"
+      fi
+      # Collect models (dedup, rough order: default then aliases).
+      _models=""
+      for _m in "${MODEL:-}" "${MODEL_OPUS:-}" "${MODEL_SONNET:-}" "${MODEL_HAIKU:-}" "${MODEL_SUBAGENT:-}"; do
+        [ -n "$_m" ] || continue
+        case "$_models" in *" $_m "*|"$_m "*|*" $_m"|"$_m") ;; *) _models="$_models $_m" ;; esac
+      done
+      _models=$(echo "$_models" | sed 's/^ *//; s/ *$//')
+      PROVIDER_NAME="$PROVIDER_NAME" BASE_URL="$BASE_URL" AUTH_MODE2="$AUTH_MODE" \
+      AUTH_TOKEN_EXTRA="$_te" KEYS_JOINED="$_keys" MODELS_JOINED="$_models" \
+      "$NODE_BIN" -e '
+        const p=process.env.PROVIDER_NAME, base=process.env.BASE_URL, am=process.env.AUTH_MODE2;
+        const token=process.env.AUTH_TOKEN_EXTRA||"";
+        const models=(process.env.MODELS_JOINED||"").split(/\s+/).filter(Boolean);
+        let auth;
+        if(am==="keypool"||am==="keychain"||am==="static"){
+          const keys=(process.env.KEYS_JOINED||"").split(/\s+/).filter(Boolean);
+          auth={type:"keypool",keys};
+        } else {
+          auth={type:"none",token};
+        }
+        process.stdout.write(JSON.stringify({prefix:p,base_url:base,auth,models})+String.fromCharCode(10));
+      '
+    ) >> "$_rt"
+  done
+  _arr=$(mktemp -t call-routes-arr.XXXXXX)
+  "$NODE_BIN" -e '
+    const fs=require("fs");
+    const lines=fs.readFileSync(process.argv[1],"utf8").split("\n").filter(Boolean);
+    const arr=lines.map(l=>JSON.parse(l));
+    fs.writeFileSync(process.argv[2], JSON.stringify(arr,null,2));
+  ' "$_rt" "$_arr"
+  rm -f "$_rt"
+  echo "$_arr"
+}
+
+_default_namespaced_model() {
+  "$NODE_BIN" -e 'const a=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const r=a[0];process.stdout.write((r&&r.prefix||"")+"/"+((r&&r.models&&r.models[0])||""));' "$1"
+}
+
+cmd_all() {
+  [ -n "$NODE_BIN" ] || die "node not found; unified gateway cannot start"
+  _gwpid=""
+  trap 'kill "${_gwpid:-}" 2>/dev/null' EXIT INT TERM
+  _routes_file=$(build_all_routes)
+  [ -s "$_routes_file" ] || die "no providers found to build the gateway"
+  _out=$(mktemp -t call-gw.XXXXXX)
+  CROUTER_ROUTES_FILE="$_routes_file" CROUTER_GATEWAY_PORT="${CROUTER_GATEWAY_PORT:-18799}" \
+    "$NODE_BIN" "$BIN_DIR/gateway" > "$_out" 2>/dev/null &
+  _gwpid=$!
+  _port=""
+  _i=0
+  while [ $_i -lt 50 ]; do
+    _port=$(grep -m1 '^CROUTER_GATEWAY_LISTENING_PORT=' "$_out" 2>/dev/null | cut -d= -f2)
+    [ -n "$_port" ] && break
+    kill -0 "$_gwpid" 2>/dev/null || break
+    sleep 0.1
+    _i=$((_i + 1))
+  done
+  if [ -z "$_port" ]; then
+    rm -f "$_out" "$_routes_file"
+    die "unified gateway failed to start"
+  fi
+  rm -f "$_out"
+  info "crouter all: unified gateway on http://127.0.0.1:$_port — switch providers with /model <provider>/<model>"
+  # Launch Claude Code pointed at the gateway (single fixed URL).
+  GATEWAY_PID="$_gwpid"
+  POST_STOP="kill \"\$GATEWAY_PID\" 2>/dev/null; rm -f \"$_routes_file\" 2>/dev/null"
+  _def=$(_default_namespaced_model "$_routes_file")
+  BASE_URL="http://127.0.0.1:$_port"
+  MODEL="$_def"; MODEL_OPUS="$_def"; MODEL_SONNET="$_def"; MODEL_HAIKU="$_def"; MODEL_SUBAGENT="$_def"
+  AUTH_MODE="none"
+  AUTH_TOKEN=""
+  CONTEXT_TOKENS=""
+  EXTRA_ENV="ANTHROPIC_AUTH_TOKEN=crouter"
+  _bypass_auth=0
+  launch_claude "$_def" "$_bypass_auth" "$@"
+}
+
 case $cmd in
   help|-h|--help) usage ;;
   version|-V|--version) info "crouter $VERSION"; exit 0 ;;
@@ -431,5 +551,6 @@ case $cmd in
       cmd_logs_list
     fi ;;
   uninstall)       cmd_uninstall "$@" ;;
+  all)            cmd_all "$@" ;;
   *)              cmd_run "$cmd" "$@" ;;
 esac

@@ -4,6 +4,11 @@ All notable changes to this local setup are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-08-02
+
+### Added
+- `crouter all`: a unified gateway that fuses every provider behind one fixed `ANTHROPIC_BASE_URL`. It starts a local Anthropic-protocol router (`bin/gateway`, dependency-free Node) and launches Claude Code against it, so providers can be switched live from inside Claude Code via `/model <provider>/<model>` (e.g. `/model ollama/qwen3.5:2b`). The router serves `GET /v1/models` (combined, namespaced catalog) and `POST /v1/messages` (route by model prefix to the right backend with that backend's own auth; keypool providers still rotate keys on 429). The gateway listens on `127.0.0.1:${CROUTER_GATEWAY_PORT:-18799}` and is reaped when Claude Code exits. The individual per-provider commands remain untouched.
+
 ## [0.4.6] - 2026-08-02
 
 ### Added

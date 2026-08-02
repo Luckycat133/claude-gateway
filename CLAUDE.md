@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Run Smoke Tests**: `./test/smoke.sh`
 - **Install Local Binary & Compatibility Launchers**: `./install.sh`
 - **Lint Shell Scripts**: `shellcheck bin/crouter bin/crouter-compat install.sh test/smoke.sh providers/*.sh providers/lib/*.sh`
-- **Run Framework Entry Point**: `./bin/crouter list` (or `doctor`, `add <provider>`, `remove <provider> --name <service>`, `list keys <provider>`)
+- **Run Framework Entry Point**: `./bin/crouter list` (or `doctor`, `add <provider>`, `remove <provider> --name <service>`, `list keys <provider>`, `all`)
 
 ## Architecture & Code Structure
 
@@ -28,11 +28,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Subcommands
 
-Subcommands are flat: `crouter <verb> [args]`. Verbs: `<provider> [<model>]` (default — launch; a bare positional before any flag selects the model), `list [keys [provider]]`, `doctor [provider]`, `add <provider> [--surface main|plus] [--name <service>]`, `remove <provider> --name <service> [--surface main|plus] [-y]`. The three key-management verbs (`add` / `remove` / `list keys`) operate on a keypool provider's `AUTH_KEYS` / `PLUS_KEYS` list and the matching macOS Keychain entries; `add` reads the secret from `/dev/tty` so it never appears in argv or shell history.
+Subcommands are flat: `crouter <verb> [args]`. Verbs: `<provider> [<model>]` (default — launch; a bare positional before any flag selects the model), `list [keys [provider]]`, `doctor [provider]`, `add <provider> [--surface main|plus] [--name <service>]`, `remove <provider> --name <service> [--surface main|plus] [-y]`, `all` (unified gateway). The three key-management verbs (`add` / `remove` / `list keys`) operate on a keypool provider's `AUTH_KEYS` / `PLUS_KEYS` list and the matching macOS Keychain entries; `add` reads the secret from `/dev/tty` so it never appears in argv or shell history. `all` starts a local Anthropic-protocol gateway (`bin/gateway`, dependency-free Node) that fronts every provider behind one `ANTHROPIC_BASE_URL`; Claude Code switches providers live via `/model <provider>/<model>` (routed by prefix, with per-provider auth and keypool key rotation).
 
 ### File Layout
 
-- `bin/crouter`: Core entry point owning launcher execution, auth lookup, key-management commands, and environment isolation.
+- `bin/crouter`: Core entry point owning launcher execution, auth lookup, key-management commands, environment isolation, and the `all` unified-gateway command.
+- `bin/gateway`: Dependency-free Node Anthropic-protocol router used by `crouter all`. Reads a routes JSON (one entry per provider: `prefix`, `base_url`, `auth`, `models`), serves `GET /v1/models` (combined namespaced catalog) and `POST /v1/messages` (route by `<provider>/` model prefix to the right backend with that backend's auth; rotates keys on 429 for keypool routes).
 - `bin/claude-*`: Compatibility launchers — symlinks to `bin/crouter-compat` that delegate to specific provider commands (the provider is derived from the invoked name).
 - `providers/`: Provider definitions (`minimax.sh`, `antigravity.sh` for Gemini, `antigravity-claude.sh` for Claude, `deepseek.sh`, `ollama.sh` for local/cloud Ollama models via its native Anthropic API).
 - `providers/lib/`: Shared provider utilities (`antigravity-common.sh` for proxy management).

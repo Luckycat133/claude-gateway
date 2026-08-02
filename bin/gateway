@@ -1,0 +1,270 @@
+#!/usr/bin/env node
+// crouter unified gateway: a tiny, dependency-free local Anthropic-protocol
+// router. Claude Code points ANTHROPIC_BASE_URL at this gateway (one fixed
+// URL); the model name carries a provider prefix (e.g. "ollama/qwen3.5:2b",
+// "deepseek/deepseek-v4-flash") and the gateway forwards each request to the
+// right backend with that backend's own auth. GET /v1/models returns the
+// combined, namespaced model catalog so Claude Code's /model can switch
+// providers live.
+//
+// This is the multi-provider generalization of bin/keypool-proxy: instead of
+// rotating keys within one provider, it routes by model prefix across
+// providers and still rotates keys on 429 for keypool-type routes.
+//
+// Env contract:
+//   CROUTER_ROUTES_FILE  path to a JSON file: an array of route objects
+//   CROUTER_GATEWAY_PORT port to listen on (default 18799)
+//   CROUTER_GATEWAY_TOKEN token Claude Code must send (accepted if non-empty;
+//                         default "crouter"). The gateway is local-only.
+//
+// Route object:
+//   { "prefix": "ollama",
+//     "base_url": "http://localhost:11434",
+//     "auth": { "type": "none", "token": "ollama" }
+//             | { "type": "keypool", "keys": ["k1","k2"] },
+//     "models": ["qwen3.5:2b", "glm-4.7-flash"] }
+
+'use strict';
+const http = require('http');
+const https = require('https');
+const fs = require('fs');
+const { URL } = require('url');
+
+function fail(msg) {
+  process.stderr.write('crouter-gateway: ' + msg + '\n');
+  process.exit(1);
+}
+
+const routesFile = process.env.CROUTER_ROUTES_FILE;
+if (!routesFile) fail('CROUTER_ROUTES_FILE not set');
+let raw;
+try {
+  raw = fs.readFileSync(routesFile, 'utf8');
+} catch (e) {
+  fail('cannot read routes file ' + routesFile + ': ' + e.message);
+}
+let ROUTES;
+try {
+  ROUTES = JSON.parse(raw);
+} catch (e) {
+  fail('routes file is not valid JSON: ' + e.message);
+}
+if (!Array.isArray(ROUTES) || ROUTES.length === 0) fail('routes must be a non-empty array');
+
+const PORT = parseInt(process.env.CROUTER_GATEWAY_PORT || '18799', 10);
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) fail('CROUTER_GATEWAY_PORT invalid');
+const GATEWAY_TOKEN = process.env.CROUTER_GATEWAY_TOKEN || 'crouter';
+
+// Pre-parse targets.
+for (const r of ROUTES) {
+  let u;
+  try {
+    u = new URL(r.base_url);
+  } catch (e) {
+    fail('bad base_url for prefix ' + r.prefix + ': ' + r.base_url);
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') fail('only http/https: ' + r.base_url);
+  r._proto = u.protocol;
+  r._host = u.hostname;
+  r._port = u.port || (u.protocol === 'https:' ? 443 : 80);
+  r._pathBase = u.pathname.replace(/\/+$/, '');
+  r.auth = r.auth || { type: 'none', token: '' };
+  if (r.auth.type === 'keypool') {
+    r.auth.keys = (r.auth.keys || []).filter(Boolean);
+    if (r.auth.keys.length === 0) fail('keypool route ' + r.prefix + ' has no keys');
+  }
+  r.models = r.models || [];
+}
+
+function routeByPrefix(prefix) {
+  return ROUTES.find((r) => r.prefix === prefix);
+}
+
+function log(msg) {
+  process.stderr.write('crouter-gateway: ' + msg + '\n');
+}
+
+// ---- GET /v1/models -------------------------------------------------------
+function handleModels(clientRes) {
+  const data = [];
+  for (const r of ROUTES) {
+    for (const m of r.models) {
+      data.push({ id: r.prefix + '/' + m, type: 'model', object: 'model' });
+    }
+  }
+  const body = JSON.stringify({ object: 'list', data: data, has_more: false });
+  clientRes.writeHead(200, { 'content-type': 'application/json' });
+  clientRes.end(body);
+}
+
+// ---- POST /v1/messages ----------------------------------------------------
+function handleMessage(clientReq, clientRes) {
+  const chunks = [];
+  let size = 0;
+  clientReq.on('data', (c) => {
+    chunks.push(c);
+    size += c.length;
+  });
+  clientReq.on('end', () => {
+    const body = Buffer.concat(chunks, size);
+    let parsed;
+    try {
+      parsed = JSON.parse(body.toString('utf8'));
+    } catch (e) {
+      clientRes.writeHead(400, { 'content-type': 'application/json' });
+      clientRes.end(JSON.stringify({ error: { type: 'invalid_request', message: 'body is not JSON' } }));
+      return;
+    }
+    const model = parsed.model || '';
+    const slash = model.indexOf('/');
+    if (slash < 0) {
+      clientRes.writeHead(400, { 'content-type': 'application/json' });
+      clientRes.end(
+        JSON.stringify({
+          error: {
+            type: 'unknown_model',
+            message:
+              'model "' + model + '" has no provider prefix. Use "<provider>/<model>" (providers: ' +
+              ROUTES.map((r) => r.prefix).join(', ') + ').',
+          },
+        })
+      );
+      return;
+    }
+    const prefix = model.slice(0, slash);
+    const realModel = model.slice(slash + 1);
+    const route = routeByPrefix(prefix);
+    if (!route) {
+      clientRes.writeHead(400, { 'content-type': 'application/json' });
+      clientRes.end(
+        JSON.stringify({
+          error: { type: 'unknown_provider', message: 'no such provider prefix: ' + prefix },
+        })
+      );
+      return;
+    }
+    // Rewrite the model to the backend's bare name, then forward.
+    parsed.model = realModel;
+    const newBody = Buffer.from(JSON.stringify(parsed), 'utf8');
+    if (route.auth.type === 'keypool') {
+      forwardKeypool(route, clientReq, clientRes, newBody);
+    } else {
+      forwardOnce(route, route.auth.token || '', clientReq, clientRes, newBody, 0);
+    }
+  });
+  clientReq.on('error', () => {
+    if (!clientRes.headersSent) clientRes.writeHead(400).end('client error');
+  });
+}
+
+// Forward once with a given auth token (none-type routes).
+function forwardOnce(route, token, clientReq, clientRes, body, attemptIdx) {
+  const headers = {};
+  for (const [h, v] of Object.entries(clientReq.headers)) {
+    const lh = h.toLowerCase();
+    if (lh === 'host' || lh === 'connection' || lh === 'proxy-connection') continue;
+    if (route.auth.type === 'none' && (lh === 'authorization' || lh === 'x-api-key')) continue;
+    headers[h] = v;
+  }
+  if (route.auth.type === 'none') {
+    // Ollama-style: a dummy ANTHROPIC_AUTH_TOKEN (value ignored by backend).
+    headers['anthropic-auth-token'] = token || 'ollama';
+    headers['x-api-key'] = token || 'ollama';
+  }
+  // The body is rewritten (model prefix stripped), so its length differs from
+  // the client's content-length. Drop it and let Node recompute.
+  delete headers['content-length'];
+  delete headers['transfer-encoding'];
+  relay(route, headers, clientReq, clientRes, body, attemptIdx);
+}
+
+// Keypool-type route: rotate keys on 429/401.
+function forwardKeypool(route, clientReq, clientRes, body) {
+  const keys = route.auth.keys;
+  let idx = 0;
+  function tryNext() {
+    if (idx >= keys.length) {
+      clientRes.writeHead(502, { 'content-type': 'application/json' });
+      clientRes.end(JSON.stringify({ error: { type: 'keypool_exhausted', message: 'all keys exhausted' } }));
+      return;
+    }
+    const key = keys[idx];
+    const headers = {};
+    for (const [h, v] of Object.entries(clientReq.headers)) {
+      const lh = h.toLowerCase();
+      if (lh === 'host' || lh === 'connection' || lh === 'proxy-connection' || lh === 'authorization' || lh === 'x-api-key') continue;
+      headers[h] = v;
+    }
+    headers['x-api-key'] = key;
+    headers['authorization'] = 'Bearer ' + key;
+    delete headers['content-length'];
+    delete headers['transfer-encoding'];
+    relay(route, headers, clientReq, clientRes, body, idx, (status) => {
+      const transient = status === 429 || status === 401;
+      if (transient) {
+        log('key ' + idx + ' on ' + route.prefix + ' got ' + status + ' -> rotating');
+        idx += 1;
+        tryNext();
+        return true; // consumed; relay should not pipe
+      }
+      return false;
+    });
+  }
+  tryNext();
+}
+
+// Core relay. onTransient(status) -> true means the caller handled retry and
+// relay must NOT pipe the (transient) response.
+function relay(route, headers, clientReq, clientRes, body, attemptIdx, onTransient) {
+  const path = route._pathBase + (clientReq.url || '/');
+  const options = {
+    protocol: route._proto,
+    host: route._host,
+    port: route._port,
+    method: clientReq.method,
+    path: path,
+    headers: headers,
+  };
+  const transport = route._proto === 'https:' ? https : http;
+  const upstream = transport.request(options, (upRes) => {
+    if (onTransient && onTransient(upRes.statusCode)) return;
+    if (!clientRes.headersSent) clientRes.writeHead(upRes.statusCode, upRes.headers);
+    upRes.pipe(clientRes);
+  });
+  upstream.on('error', (e) => {
+    log('upstream error (' + route.prefix + '): ' + e.message);
+    if (!clientRes.headersSent) {
+      clientRes.writeHead(502, { 'content-type': 'application/json' });
+      clientRes.end(JSON.stringify({ error: { type: 'upstream_error', message: e.message } }));
+    }
+  });
+  if (body && body.length) upstream.write(body);
+  upstream.end();
+}
+
+const server = http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url.split('?')[0] === '/v1/models') {
+    handleModels(res);
+    return;
+  }
+  if (req.method === 'POST' && req.url.split('?')[0] === '/v1/messages') {
+    handleMessage(req, res);
+    return;
+  }
+  res.writeHead(404, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ error: { type: 'not_found', message: 'only /v1/messages and /v1/models are served' } }));
+});
+
+server.listen(PORT, '127.0.0.1', () => {
+  const actual = server.address().port;
+  process.stdout.write('CROUTER_GATEWAY_LISTENING_PORT=' + actual + '\n');
+  log('listening on 127.0.0.1:' + actual + ' | providers=' + ROUTES.map((r) => r.prefix).join(',') +
+    ' | models=' + ROUTES.reduce((a, r) => a + r.models.length, 0));
+});
+
+function shutdown() {
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 500).unref();
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

@@ -66,6 +66,34 @@ crouter antigravity --model gemini-3.6-flash-high # explicit --model also works
 ANTHROPIC_MODEL=gemini-3.6-flash-high crouter antigravity
 ```
 
+### Unified gateway: `crouter all`
+
+`crouter all` fuses every provider behind one fixed URL. It starts a local
+Anthropic-protocol gateway (a single `ANTHROPIC_BASE_URL`) and launches Claude
+Code against it. The model name carries a `<provider>/` prefix, so you switch
+backends live from inside Claude Code:
+
+```sh
+crouter all                           # start the unified gateway + Claude Code
+/model ollama/qwen3.5:2b              # inside Claude Code: switch to Ollama
+/model deepseek/deepseek-v4-flash     # or to DeepSeek / MiniMax / Antigravity…
+```
+
+- `GET /v1/models` on the gateway returns the combined, namespaced catalog, so
+  `/model` can list and switch across providers.
+- Each request is routed by prefix to the right backend with that backend's own
+  auth (Keychain keys for MiniMax/DeepSeek, the static token for Antigravity,
+  the dummy token for Ollama). Keypool providers still rotate keys on 429.
+- The gateway listens on `127.0.0.1:${CROUTER_GATEWAY_PORT:-18799}` by default;
+  override with `CROUTER_GATEWAY_PORT`. It is reaped automatically when Claude
+  Code exits.
+- The individual per-provider commands (`crouter ollama`, `crouter deepseek`,
+  …) are untouched and still launch directly.
+
+> Note: Claude Code's `/model` listing for a custom base URL depends on the
+> Claude Code version; even if the list does not auto-populate, typing the
+> namespaced model (e.g. `/model ollama/qwen3.5:2b`) works.
+
 ## How it works
 
 The entry point:
