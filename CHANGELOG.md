@@ -67,7 +67,7 @@ All notable changes to this local setup are documented in this file.
 ## [0.2.0] - 2026-07-30
 
 ### Added
-- bash/zsh shell autocompletion (`completions/claude-gateway.bash` and `.zsh`).
+- bash/zsh shell autocompletion (`completions/crouter.bash` and `.zsh`).
 - Offline smoke test (`test/smoke.sh`).
 - GitHub Actions CI running `shellcheck` + smoke test on push/PR.
 
