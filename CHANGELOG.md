@@ -22,12 +22,15 @@ All notable changes to this local setup are documented in this file.
 ## [0.4.1] - 2026-08-02
 
 ### Changed
-- Renamed the launcher and its messages from `claude-gateway` to `crouter` (filenames unchanged).
+- Renamed the launcher and its messages from `claude-gateway` to `crouter`. The binary file `bin/claude-gateway` was renamed to `bin/crouter` in a follow-up fix commit that completed the rename (the initial 0.4.1 commit only rewrote the string references).
 
 ## [0.4.0] - 2026-08-02
 
 ### Added
 - Key-management subcommands for keypool providers: `add`, `rotate`, `remove`, `list keys` (Keychain-backed, TTY-entered secrets).
+
+### Fixed
+- `crouter <provider> --version` (and `--help`) no longer spins up the Node keypool proxy — auth/proxy startup is bypassed for help/version queries and torn down cleanly.
 
 ## [0.3.4] - 2026-08-01
 
