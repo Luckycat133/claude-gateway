@@ -29,6 +29,8 @@ crouter/
 ./install.sh          # symlinks crouter into ~/.local/bin, creates config.sh
 ```
 
+> **If you move or rename the repo directory**, the existing symlinks in `~/.local/bin` keep pointing at the old path and break (`command not found`). Re-run `./install.sh` to regenerate them. A stale shell may also cache the old command — run `rehash` (zsh) or open a new terminal.
+
 For backward compatibility, the installer also provides these equivalent shortcuts:
 
 ```sh

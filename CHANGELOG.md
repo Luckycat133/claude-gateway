@@ -4,6 +4,8 @@ All notable changes to this local setup are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-08-02
+
 ### Added
 - Added an `ollama` provider (`providers/ollama.sh`) that runs Claude Code against local or cloud open-weight models through Ollama's native Anthropic-compatible Messages API (Ollama v0.14.0+). No translation proxy and no API key are needed — `BASE_URL` points at `http://localhost:11434` and `AUTH_MODE="none"` injects the dummy `ANTHROPIC_AUTH_TOKEN=ollama` (Ollama ignores it) via `EXTRA_ENV`. `PRE_START` verifies the Ollama service is up; `HEALTH_CHECK_URL` enables `doctor` checks. `install.sh` now also links `claude-ollama`. Verified end-to-end with `qwen3.5:2b` on 2026-08-02 (no proxy, no key).
 
