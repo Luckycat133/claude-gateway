@@ -7,6 +7,9 @@ All notable changes to this local setup are documented in this file.
 ### Added
 - Added an `ollama` provider (`providers/ollama.sh`) that runs Claude Code against local or cloud open-weight models through Ollama's native Anthropic-compatible Messages API (Ollama v0.14.0+). No translation proxy and no API key are needed — `BASE_URL` points at `http://localhost:11434` and `AUTH_MODE="none"` injects the dummy `ANTHROPIC_AUTH_TOKEN=ollama` (Ollama ignores it) via `EXTRA_ENV`. `PRE_START` verifies the Ollama service is up; `HEALTH_CHECK_URL` enables `doctor` checks. `install.sh` now also links `claude-ollama`. Verified end-to-end with `qwen3.5:2b` on 2026-08-02 (no proxy, no key).
 
+### Changed
+- `crouter <provider> <model>` is now shorthand for `--model <model>`: the first bare positional argument before any flag is treated as the model and is stripped from the args forwarded to Claude Code (so `crouter ollama qwen3.5:2b -p "hi"` works, and a flag's value such as `-p "x"` is never misread as the model). Explicit `--model` still wins. Applies to every provider through the shared `cmd_run` dispatch.
+
 ## [0.4.5] - 2026-08-02
 
 ### Changed

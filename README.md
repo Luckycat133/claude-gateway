@@ -43,6 +43,8 @@ To use the Antigravity providers, also set up the third-party proxy (see below).
 
 ## Usage
 
+The first bare word after a provider name selects the model (e.g. `crouter ollama qwen3.5:2b`).
+
 ```sh
 crouter list                     # available providers
 crouter minimax                  # Claude Code via MiniMax M3
@@ -53,9 +55,12 @@ crouter ollama                    # Claude Code via Ollama (local/cloud models)
 crouter doctor [provider]        # environment diagnostics
 ```
 
-Extra arguments after the provider name are passed straight to Claude Code. Per-session model override:
+Extra arguments after the provider name are passed straight to Claude Code. Per-session model override — the model may be a bare positional (the first word before any flag) or an explicit flag:
 
 ```sh
+crouter ollama qwen3.5:2b                        # positional model (short form)
+crouter ollama qwen3.5:2b -p "hi"                # positional model + flags
+crouter antigravity --model gemini-3.6-flash-high # explicit --model also works
 ANTHROPIC_MODEL=gemini-3.6-flash-high crouter antigravity
 ```
 

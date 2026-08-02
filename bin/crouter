@@ -2,7 +2,7 @@
 # crouter - unified launcher for Claude Code against multiple providers.
 #
 # Usage:
-#   crouter <provider> [claude args...]   Launch Claude Code via a provider
+#   crouter <provider> [<model>] [claude args...]   Launch (optional positional model)
 #   crouter list                          List available providers
 #   crouter doctor [provider]             Run environment diagnostics
 #   crouter add <provider>                Add a key to a provider's keychain keypool
@@ -94,23 +94,53 @@ cmd_run() {
   load_provider "$_p"
 
   # Resolve the primary model with this precedence:
-  #   --model <x>  >  ANTHROPIC_MODEL env  >  provider MODEL
+  #   --model <x>  >  first bare positional (short form)  >  ANTHROPIC_MODEL  >  provider MODEL
+  # A bare positional model is only taken if it appears BEFORE any flag, so it
+  # never collides with a flag's own value (e.g. `crouter ollama -p "prompt"`).
   _main_model=""
   _model_set=0
+  _pos_model=""
+  _pos_idx=0
+  _seen_flag=0
+  _n=$#
   _i=0
-  while [ $_i -lt $# ]; do
+  while [ $_i -lt $_n ]; do
     _i=$((_i + 1))
     eval "_a=\${$_i}"
     case "$_a" in
-      --model=*) _main_model=${_a#--model=}; _model_set=1 ;;
+      --model=*)
+        _main_model=${_a#--model=}; _model_set=1; _seen_flag=1 ;;
       --model)
         _i=$((_i + 1))
-        eval "_main_model=\${$_i}"; _model_set=1
+        eval "_main_model=\${$_i}"; _model_set=1; _seen_flag=1 ;;
+      -*)
+        _seen_flag=1 ;;
+      *)
+        if [ "$_seen_flag" -eq 0 ] && [ -z "$_pos_model" ]; then
+          _pos_model=$_a; _pos_idx=$_i
+        fi
         ;;
     esac
   done
+
+  # Rebuild $@ with the positional model removed so it isn't forwarded to Claude.
+  if [ "$_pos_idx" -gt 0 ]; then
+    _i=0
+    while [ $_i -lt $_n ]; do
+      _i=$((_i + 1))
+      if [ $_i -eq $_pos_idx ]; then
+        shift
+      else
+        _first=$1; shift
+        set -- "$@" "$_first"
+      fi
+    done
+  fi
+
   if [ "$_model_set" -eq 1 ] && [ -n "$_main_model" ]; then
     : # explicit --model wins
+  elif [ -n "$_pos_model" ]; then
+    _main_model=$_pos_model
   elif [ -n "${ANTHROPIC_MODEL:-}" ]; then
     _main_model=$ANTHROPIC_MODEL
   else

@@ -28,7 +28,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Subcommands
 
-Subcommands are flat: `crouter <verb> [args]`. Verbs: `<provider>` (default — launch), `list [keys [provider]]`, `doctor [provider]`, `add <provider> [--surface main|plus] [--name <service>]`, `remove <provider> --name <service> [--surface main|plus] [-y]`. The three key-management verbs (`add` / `remove` / `list keys`) operate on a keypool provider's `AUTH_KEYS` / `PLUS_KEYS` list and the matching macOS Keychain entries; `add` reads the secret from `/dev/tty` so it never appears in argv or shell history.
+Subcommands are flat: `crouter <verb> [args]`. Verbs: `<provider> [<model>]` (default — launch; a bare positional before any flag selects the model), `list [keys [provider]]`, `doctor [provider]`, `add <provider> [--surface main|plus] [--name <service>]`, `remove <provider> --name <service> [--surface main|plus] [-y]`. The three key-management verbs (`add` / `remove` / `list keys`) operate on a keypool provider's `AUTH_KEYS` / `PLUS_KEYS` list and the matching macOS Keychain entries; `add` reads the secret from `/dev/tty` so it never appears in argv or shell history.
 
 ### File Layout
 
