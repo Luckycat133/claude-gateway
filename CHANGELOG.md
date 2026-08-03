@@ -2,10 +2,10 @@
 
 All notable changes to this local setup are documented in this file.
 
-## [Unreleased]
+## [0.4.11] - 2026-08-03
 
 ### Added
-- **MiniMax auto-MCP wiring.** `crouter minimax` auto-registers the two official MiniMax MCP servers (`minimax-coding` = `web_search` + `understand_image`, `minimax-gen` = `text_to_image` / `generate_video` / `music_generation` / `voice_clone` / `voice_design`) and installs the `minimax-multimodal-toolkit` skill via the official `uvx` method — but only when a Token Plan key (`codex-minimax-token-plan` in Keychain) is present. Idempotent; already-registered servers / installed skills are skipped. Gated by `MINIMAX_AUTO_MCP` (default 1) and `MINIMAX_AUTO_SKILL` (default 1) in `config.sh`; set to `0` to disable. Wiring is driven by `providers/minimax.sh`'s `PRE_START` hook → `bin/minimax-mcp-autosetup`.
+- **MiniMax auto-MCP wiring.** `crouter minimax` auto-registers the two official MiniMax MCP servers (`minimax-coding` = `web_search` + `understand_image`, `minimax-gen` = `text_to_image` / `generate_video` / `music_generation` / `voice_clone` / `voice_design`) and installs the `minimax-multimodal-toolkit` skill via the official `uvx` method — but only when a Token Plan key (`codex-minimax-token-plan` in Keychain) is present. Idempotent; already-registered servers / installed skills are skipped. Gated by `MINIMAX_AUTO_MCP` (default 1) and `MINIMAX_AUTO_SKILL` (default 1) in `config.sh`; set to `0` to disable. Wiring is driven by `providers/minimax.sh`'s `PRE_START` hook → `bin/minimax-mcp-autosetup`. Missing dependencies are auto-installed using the official methods: `uvx` (astral.sh installer) and `mmx-cli` (`npm install -g`), and `mmx auth login` runs automatically with the Token Plan key so the skill is usable immediately.
 
 ### Removed
 - `bin/minimax-mcp-bridge` (obsoleted by the official-`uvx` auto-wiring above).

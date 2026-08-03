@@ -32,12 +32,18 @@ if [ -z "$KEY" ]; then
   exit 0
 fi
 
-# --- locate uvx (official MiniMax install method) ---
+# --- ensure uvx (official MiniMax install method) ---
 UVX="${MINIMAX_UVX:-$HOME/.local/bin/uvx}"
 command -v "$UVX" >/dev/null 2>&1 || UVX="uvx"
 if ! command -v "$UVX" >/dev/null 2>&1; then
-  echo "[minimax] uvx not found — install it (https://docs.astral.sh/uv/) to enable auto-mcp"
-  exit 0
+  echo "[minimax] uvx not found — installing via the official astral.sh installer ..."
+  if curl -LsSf https://astral.sh/uv/install.sh | sh 2>&1 | tail -3; then
+    UVX="$HOME/.local/bin/uvx"
+    echo "[minimax] uvx installed at $UVX"
+  else
+    echo "[minimax] uvx install failed — skipping auto-mcp setup"
+    exit 0
+  fi
 fi
 
 HOST="${MINIMAX_API_HOST:-https://api.minimaxi.com}"
@@ -64,6 +70,20 @@ register_mcp minimax-gen \
 
 # Multimodal skill (official MiniMax-AI/skills), idempotent clone.
 if [ "${MINIMAX_AUTO_SKILL:-1}" = "1" ]; then
+  # ensure mmx-cli (skill backend) via official npm method
+  if ! command -v mmx >/dev/null 2>&1; then
+    echo "[minimax] mmx-cli not found — installing via 'npm install -g mmx-cli' ..."
+    if npm install -g mmx-cli 2>&1 | tail -3; then
+      echo "[minimax] mmx-cli installed"
+    else
+      echo "[minimax] mmx-cli install failed — skill will be present but non-functional until mmx is installed"
+    fi
+  fi
+  # auto-login with the Token Plan key so the skill works out of the box
+  if command -v mmx >/dev/null 2>&1 && [ ! -f "$HOME/.mmx/config.json" ]; then
+    echo "[minimax] logging into mmx-cli with the Token Plan key ..."
+    mmx auth login --api-key "$KEY" 2>&1 | tail -2 || true
+  fi
   _skill_dir="$HOME/.claude/skills/minimax-multimodal-toolkit"
   if [ -d "$_skill_dir" ]; then
     echo "[minimax] skill minimax-multimodal-toolkit already present"
