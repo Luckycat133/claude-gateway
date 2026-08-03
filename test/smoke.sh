@@ -211,6 +211,7 @@ cp "$ROOT_DIR/providers/lib/antigravity-common.sh" "$FAKE_ROOT/providers/lib/" 2
 # Wrapper that runs the fake-rooted gateway with our fake security/node on PATH.
 FAKE_GW="$FAKE_ROOT/bin/crouter"
 run_fake_gw() {
+  # shellcheck disable=SC2317
   PATH="$FAKE_BIN:$PATH" MOCK_DIR="$MOCK_DIR" "$FAKE_GW" "$@"
 }
 
