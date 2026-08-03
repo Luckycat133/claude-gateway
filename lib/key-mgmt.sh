@@ -34,7 +34,9 @@ _write_kv() {
   # If the variable line is missing, append it. Otherwise replace it.
   if grep -q "^$2=" "$1" 2>/dev/null; then
     # shellcheck disable=SC1003
-    sed -i '' "s${_delim}^$2=.*${_delim}$2=\"$_val\"${_delim}" "$1"
+    # Portable in-place edit: GNU sed's `sed -i ''` parsing differs from BSD sed,
+    # so write to a temp file and rename instead of relying on `sed -i`.
+    sed "s${_delim}^$2=.*${_delim}$2=\"$_val\"${_delim}" "$1" > "$1.tmp" && mv "$1.tmp" "$1"
   else
     printf '\n%s="%s"\n' "$2" "$_val" >> "$1"
   fi
