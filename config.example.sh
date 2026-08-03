@@ -18,3 +18,10 @@
 # Defaults: $ROOT_DIR/antigravity-claude-proxy and 18080.
 #ANTIGRAVITY_PROXY_DIR="$ROOT_DIR/antigravity-claude-proxy"
 #ANTIGRAVITY_PORT=18080
+
+# MiniMax auto-MCP wiring. When `crouter minimax` starts and a Token Plan key
+# (Keychain service `codex-minimax-token-plan`) is present, two official MCP
+# servers (minimax-coding, minimax-gen) and the multimodal skill are registered
+# automatically via the official uvx method. Set either to 0 to disable.
+#MINIMAX_AUTO_MCP=1
+#MINIMAX_AUTO_SKILL=1

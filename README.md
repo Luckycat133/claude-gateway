@@ -335,30 +335,33 @@ security add-generic-password -U -a "$USER" -s "codex-minimax-token-plan" -w "$M
 unset MINIMAX_TOKEN_PLAN_KEY
 ```
 
-#### MiniMax MCP tools (web search + image understanding)
+#### MiniMax MCP tools (auto-wired)
 
-MiniMax publishes an official MCP server, `MiniMax-Coding-Plan-MCP`, that exposes two
-tools Claude Code can call: `web_search` (联网搜索) and `understand_image` (图像理解,
-URL or local file). They draw from the same Token Plan `coding_plan` quota as the
-model endpoint, so a working `codex-minimax-token-plan` Keychain key is required.
+Launching `crouter minimax` automatically wires up MiniMax's MCP servers and the
+multimodal skill **when a Token Plan key (`codex-minimax-token-plan` in Keychain)
+is present** — no manual `claude mcp add` needed:
 
-`bin/minimax-mcp-bridge` reads that key from the Keychain (no plaintext secret in any
-Claude Code config) and launches the server from an isolated venv. One-time setup:
+- `minimax-coding` (`MiniMax-Coding-Plan-MCP`): `web_search` + `understand_image`
+- `minimax-gen` (`MiniMax-MCP`): `text_to_image` / `generate_video` / `music_generation`
+  / `voice_clone` / `voice_design` …
+- `minimax-multimodal-toolkit` skill (official `MiniMax-AI/skills`, backed by `mmx-cli`)
+
+The wiring uses the official `uvx` install method (pinned to `mcp==1.9.4`, because
+MiniMax's packages import the removed `mcp.server.fastmcp` path under mcp 2.x) and
+is idempotent — already-registered servers and installed skills are skipped. The
+tools share the `coding_plan` quota with the model endpoint, so a working Token
+Plan key is required.
+
+**Turn it off.** Copy `config.example.sh` to `config.sh` and set:
 
 ```sh
-# 1. isolated runtime (minimax-coding-plan-mcp 0.0.4 needs mcp<2: it imports the
-#    removed mcp.server.fastmcp path)
-PY=/Users/jack/.workbuddy/binaries/python/versions/3.13.12/bin/python3
-"$PY" -m venv /Users/jack/.local/venvs/minimax-mcp
-/Users/jack/.local/venvs/minimax-mcp/bin/pip install "minimax-coding-plan-mcp" "mcp==1.9.4"
-
-# 2. register with Claude Code (user scope → available to crouter minimax too)
-claude mcp add-json minimax '{"command":"/Users/jack/Documents/crouter/bin/minimax-mcp-bridge","args":[],"env":{}}' --scope user
+MINIMAX_AUTO_MCP=0   # disable both MCP servers + the skill
+# or keep the MCP servers but skip the skill clone:
+MINIMAX_AUTO_SKILL=0
 ```
 
-`claude mcp list` should show `minimax … ✔ Connected` and the two tools become
-available inside Claude Code. Override the API host with `MINIMAX_API_HOST`
-(global plan → `https://api.minimax.io`) or the venv path with `MINIMAX_MCP_VENV`.
+`claude mcp list` should then show `minimax-coding … ✔ Connected` and
+`minimax-gen … ✔ Connected`.
 
 ### DeepSeek V4
 

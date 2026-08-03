@@ -1,0 +1,84 @@
+#!/bin/sh
+# bin/minimax-mcp-autosetup
+#
+# Auto-wire MiniMax MCP servers + multimodal skill when a Token Plan key is present.
+# Triggered by providers/minimax.sh PRE_START on `crouter minimax` launch.
+#
+# Gated by MINIMAX_AUTO_MCP (default 1). Set MINIMAX_AUTO_MCP=0 in config.sh to
+# disable the whole auto-wiring. The multimodal skill alone is gated by
+# MINIMAX_AUTO_SKILL (default 1).
+#
+# Uses the OFFICIAL uvx install method (no vendored MCP server). Pins mcp==1.9.4
+# because MiniMax's packages import the removed `mcp.server.fastmcp` path under
+# mcp 2.x. Idempotent: already-registered servers / installed skills are skipped.
+
+set -eu
+
+# --- gate ---
+if [ "${MINIMAX_AUTO_MCP:-1}" != "1" ]; then
+  echo "[minimax] auto-mcp disabled (MINIMAX_AUTO_MCP=${MINIMAX_AUTO_MCP:-1})"
+  exit 0
+fi
+
+# --- detect Token Plan key in Keychain ---
+KEY_NAME="codex-minimax-token-plan"
+if ! security find-generic-password -a "$USER" -s "$KEY_NAME" >/dev/null 2>&1; then
+  echo "[minimax] no Token Plan key ($KEY_NAME) in Keychain — skipping auto-mcp setup"
+  exit 0
+fi
+KEY=$(security find-generic-password -a "$USER" -s "$KEY_NAME" -w 2>/dev/null) || true
+if [ -z "$KEY" ]; then
+  echo "[minimax] Token Plan key found but unreadable — skipping auto-mcp setup"
+  exit 0
+fi
+
+# --- locate uvx (official MiniMax install method) ---
+UVX="${MINIMAX_UVX:-$HOME/.local/bin/uvx}"
+command -v "$UVX" >/dev/null 2>&1 || UVX="uvx"
+if ! command -v "$UVX" >/dev/null 2>&1; then
+  echo "[minimax] uvx not found — install it (https://docs.astral.sh/uv/) to enable auto-mcp"
+  exit 0
+fi
+
+HOST="${MINIMAX_API_HOST:-https://api.minimaxi.com}"
+GEN_PATH="${MINIMAX_MCP_BASE_PATH:-$HOME/minimax-output}"
+
+register_mcp() {
+  _name="$1"; shift
+  if claude mcp list 2>/dev/null | grep -q "$_name"; then
+    echo "[minimax] mcp '$_name' already registered"
+    return 0
+  fi
+  echo "[minimax] registering mcp '$_name' ..."
+  claude mcp add -s user "$_name" "$@"
+}
+
+# Two official MCP servers (pinned mcp SDK for compatibility).
+register_mcp minimax-coding \
+  --env MINIMAX_API_KEY="$KEY" --env MINIMAX_API_HOST="$HOST" \
+  -- "$UVX" --with mcp==1.9.4 minimax-coding-plan-mcp -y
+register_mcp minimax-gen \
+  --env MINIMAX_API_KEY="$KEY" --env MINIMAX_API_HOST="$HOST" \
+  --env MINIMAX_MCP_BASE_PATH="$GEN_PATH" \
+  -- "$UVX" --with mcp==1.9.4 minimax-mcp -y
+
+# Multimodal skill (official MiniMax-AI/skills), idempotent clone.
+if [ "${MINIMAX_AUTO_SKILL:-1}" = "1" ]; then
+  _skill_dir="$HOME/.claude/skills/minimax-multimodal-toolkit"
+  if [ -d "$_skill_dir" ]; then
+    echo "[minimax] skill minimax-multimodal-toolkit already present"
+  else
+    echo "[minimax] installing minimax-multimodal-toolkit skill ..."
+    _tmp=$(mktemp -d)
+    if git clone --depth 1 https://github.com/MiniMax-AI/skills.git "$_tmp" >/dev/null 2>&1; then
+      mkdir -p "$HOME/.claude/skills"
+      cp -r "$_tmp/skills/minimax-multimodal-toolkit" "$_skill_dir"
+      echo "[minimax] skill installed to $_skill_dir"
+    else
+      echo "[minimax] skill clone failed (offline?), skipping"
+    fi
+    rm -rf "$_tmp"
+  fi
+fi
+
+echo "[minimax] auto-mcp setup complete"

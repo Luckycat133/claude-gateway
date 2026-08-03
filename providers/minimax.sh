@@ -36,6 +36,9 @@ AUTH_KEYS="codex-minimax-token-plan"
 EXTRA_ENV="API_TIMEOUT_MS=3000000
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
 
-PRE_START=""
+# Auto-wire MiniMax MCP (coding + generation) and the multimodal skill when a
+# Token Plan key is present. Uses the official uvx method; gated by
+# MINIMAX_AUTO_MCP (default 1) in config.sh. See bin/minimax-mcp-autosetup.
+PRE_START="$ROOT_DIR/bin/minimax-mcp-autosetup"
 POST_STOP=""
 HEALTH_CHECK_URL=""
