@@ -346,11 +346,15 @@ is present** — no manual `claude mcp add` needed:
   / `voice_clone` / `voice_design` …
 - `minimax-multimodal-toolkit` skill (official `MiniMax-AI/skills`, backed by `mmx-cli`)
 
-The wiring uses the official `uvx` install method (pinned to `mcp==1.9.4`, because
-MiniMax's packages import the removed `mcp.server.fastmcp` path under mcp 2.x) and
-is idempotent — already-registered servers and installed skills are skipped. The
-tools share the `coding_plan` quota with the model endpoint, so a working Token
-Plan key is required.
+The wiring uses the official methods and is idempotent — already-registered
+servers / installed skills are skipped. The two MCP servers use the official `uvx`
+install method (pinned to `mcp==1.9.4`, because MiniMax's packages import the
+removed `mcp.server.fastmcp` path under mcp 2.x); the skill uses the official Claude
+Code plugin method (`claude plugin marketplace add https://github.com/MiniMax-AI/skills`
++ `claude plugin install minimax-skills`, global/user scope — not project-level).
+All three are registered globally (`claude mcp add -s user`, `~/.claude` plugins),
+never project-scoped. The tools share the `coding_plan` quota with the model
+endpoint, so a working Token Plan key is required.
 
 **Turn it off.** Copy `config.example.sh` to `config.sh` and set:
 

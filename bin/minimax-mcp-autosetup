@@ -68,7 +68,7 @@ register_mcp minimax-gen \
   --env MINIMAX_MCP_BASE_PATH="$GEN_PATH" \
   -- "$UVX" --with mcp==1.9.4 minimax-mcp -y
 
-# Multimodal skill (official MiniMax-AI/skills), idempotent clone.
+# Multimodal skill (official Claude Code method: plugin marketplace, global/user scope)
 if [ "${MINIMAX_AUTO_SKILL:-1}" = "1" ]; then
   # ensure mmx-cli (skill backend) via official npm method
   if ! command -v mmx >/dev/null 2>&1; then
@@ -84,20 +84,16 @@ if [ "${MINIMAX_AUTO_SKILL:-1}" = "1" ]; then
     echo "[minimax] logging into mmx-cli with the Token Plan key ..."
     mmx auth login --api-key "$KEY" 2>&1 | tail -2 || true
   fi
-  _skill_dir="$HOME/.claude/skills/minimax-multimodal-toolkit"
-  if [ -d "$_skill_dir" ]; then
-    echo "[minimax] skill minimax-multimodal-toolkit already present"
+  # official Claude Code install: marketplace add + plugin install (global, not project-level)
+  _old_dir="$HOME/.claude/skills/minimax-multimodal-toolkit"
+  if claude plugin list 2>/dev/null | grep -q "minimax-skills"; then
+    echo "[minimax] minimax-skills plugin already installed (global)"
   else
-    echo "[minimax] installing minimax-multimodal-toolkit skill ..."
-    _tmp=$(mktemp -d)
-    if git clone --depth 1 https://github.com/MiniMax-AI/skills.git "$_tmp" >/dev/null 2>&1; then
-      mkdir -p "$HOME/.claude/skills"
-      cp -r "$_tmp/skills/minimax-multimodal-toolkit" "$_skill_dir"
-      echo "[minimax] skill installed to $_skill_dir"
-    else
-      echo "[minimax] skill clone failed (offline?), skipping"
-    fi
-    rm -rf "$_tmp"
+    echo "[minimax] installing minimax-skills plugin (official Claude Code method, global) ..."
+    # remove the old git-clone copy to avoid a duplicate skill entry
+    [ -d "$_old_dir" ] && rm -rf "$_old_dir" && echo "[minimax] removed old git-clone skill copy"
+    claude plugin marketplace add https://github.com/MiniMax-AI/skills 2>&1 | tail -2 || true
+    claude plugin install minimax-skills 2>&1 | tail -3
   fi
 fi
 
