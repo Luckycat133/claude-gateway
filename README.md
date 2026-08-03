@@ -335,6 +335,31 @@ security add-generic-password -U -a "$USER" -s "codex-minimax-token-plan" -w "$M
 unset MINIMAX_TOKEN_PLAN_KEY
 ```
 
+#### MiniMax MCP tools (web search + image understanding)
+
+MiniMax publishes an official MCP server, `MiniMax-Coding-Plan-MCP`, that exposes two
+tools Claude Code can call: `web_search` (联网搜索) and `understand_image` (图像理解,
+URL or local file). They draw from the same Token Plan `coding_plan` quota as the
+model endpoint, so a working `codex-minimax-token-plan` Keychain key is required.
+
+`bin/minimax-mcp-bridge` reads that key from the Keychain (no plaintext secret in any
+Claude Code config) and launches the server from an isolated venv. One-time setup:
+
+```sh
+# 1. isolated runtime (minimax-coding-plan-mcp 0.0.4 needs mcp<2: it imports the
+#    removed mcp.server.fastmcp path)
+PY=/Users/jack/.workbuddy/binaries/python/versions/3.13.12/bin/python3
+"$PY" -m venv /Users/jack/.local/venvs/minimax-mcp
+/Users/jack/.local/venvs/minimax-mcp/bin/pip install "minimax-coding-plan-mcp" "mcp==1.9.4"
+
+# 2. register with Claude Code (user scope → available to crouter minimax too)
+claude mcp add-json minimax '{"command":"/Users/jack/Documents/crouter/bin/minimax-mcp-bridge","args":[],"env":{}}' --scope user
+```
+
+`claude mcp list` should show `minimax … ✔ Connected` and the two tools become
+available inside Claude Code. Override the API host with `MINIMAX_API_HOST`
+(global plan → `https://api.minimax.io`) or the venv path with `MINIMAX_MCP_VENV`.
+
 ### DeepSeek V4
 
 Anthropic-compatible endpoint `https://api.deepseek.com/anthropic`, default `deepseek-v4-flash`, 1,000,000-token context. The key is read from the Keychain item `deepseek-api-key`. To set or rotate it without shell-history exposure:

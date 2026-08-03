@@ -1,0 +1,30 @@
+#!/bin/sh
+# Bridge for the MiniMax Coding-Plan MCP server.
+# Reads the MiniMax Token Plan API key from macOS Keychain (no plaintext secret
+# in any Claude Code config) and launches the MCP server from its isolated venv.
+# Registered with `claude mcp add` so Claude Code (incl. via `crouter minimax`)
+# gets the `web_search` and `understand_image` tools.
+#
+# Keychain item : service "codex-minimax-token-plan" (account = $USER)
+# Host          : MiniMax mainland endpoint (Token Plan). Override with
+#                 MINIMAX_API_HOST if you are on the global plan.
+set -e
+
+KEYCHAIN_SVC="codex-minimax-token-plan"
+VENV_BIN="${MINIMAX_MCP_VENV:-/Users/jack/.local/venvs/minimax-mcp}/bin/minimax-coding-plan-mcp"
+
+KEY="$(/usr/bin/security find-generic-password -a "${USER:-jack}" -s "$KEYCHAIN_SVC" -w 2>/dev/null)"
+if [ -z "$KEY" ]; then
+  echo "minimax-mcp-bridge: keychain item '$KEYCHAIN_SVC' not found (account ${USER:-jack})" >&2
+  exit 1
+fi
+
+export MINIMAX_API_KEY="$KEY"
+export MINIMAX_API_HOST="${MINIMAX_API_HOST:-https://api.minimaxi.com}"
+
+if [ ! -x "$VENV_BIN" ]; then
+  echo "minimax-mcp-bridge: server binary not found at '$VENV_BIN'" >&2
+  exit 1
+fi
+
+exec "$VENV_BIN" "$@"
