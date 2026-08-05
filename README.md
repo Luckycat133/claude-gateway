@@ -13,6 +13,7 @@ crouter/
 ├── providers/
 │   ├── anthropic.sh               # Anthropic Claude (subscription OAuth -> API key)
 │   ├── openai.sh                  # OpenAI GPT via the Anthropic-compatible Messages API
+│   ├── codex.sh                   # ChatGPT/Codex 订阅 via icebear0828/codex-proxy
 │   ├── openrouter.sh              # OpenRouter unified gateway
 │   ├── minimax.sh                 # MiniMax M3 (China endpoint)
 │   ├── deepseek.sh                # DeepSeek V4 (Flash/Pro) via /anthropic endpoint
@@ -41,6 +42,7 @@ claude-minimax                # crouter minimax
 claude-antigravity            # crouter antigravity
 claude-antigravity-claude     # crouter antigravity-claude
 claude-deepseek              # crouter deepseek
+claude-codex                 # crouter codex
 claude-ollama                # crouter ollama
 ```
 
@@ -150,7 +152,7 @@ HEALTH_CHECK_URL=""                         # used by status/doctor
 
 ## Dual-source providers: default account first, API key as fallback
 
-`anthropic`, `openai` and `openrouter` do not use `AUTH_MODE`. They declare up to
+`anthropic` and `openrouter` do not use `AUTH_MODE`. They declare up to
 two *credential surfaces* and crouter always spends the **default account's
 included quota first**, falling back to the metered API key on **401/429**:
 
@@ -284,26 +286,42 @@ proxy is only started when both are present.
 
 ### OpenAI GPT
 
-Endpoint `https://api.openai.com/v1/messages` (OpenAI's Anthropic-compatible
-Messages API), default `gpt-4o`, 128k context. Also dual-source, but the
-"default account" here is an **optional** gateway you point at yourself — e.g. an
-org proxy or a pooled-quota endpoint. Leave it unset to go straight to the key.
+Endpoint `https://api.openai.com/v1/messages` — OpenAI's own Anthropic-compatible
+Messages API, so Claude Code talks to GPT natively (Bearer API key; it does NOT
+use Anthropic's `x-api-key` header). Single credential surface; auth is one API
+key in Keychain.
 
 ```sh
-# Fallback (usually all you need):
 read -s "OPENAI_KEY?Paste OpenAI API key: "; echo
 security add-generic-password -U -a "$USER" -s "openai-api-key" -w "$OPENAI_KEY"
 unset OPENAI_KEY
 
-# Optional preferred surface, spent before the metered key:
-export OPENAI_DEFAULT_URL="https://my-org-gateway.example.com/v1/messages"
-export OPENAI_DEFAULT_TOKEN="..."
-
 crouter openai
 ```
 
+Models (official catalog, 2026-07-09+): `gpt-5.6-sol` (frontier tier),
+`gpt-5.6-terra` (balanced, default), `gpt-5.6-luna` (efficient tier) — all
+1.05M ctx / 128K max output. Reasoning effort defaults to `high`; OpenAI's
+compat endpoint maps Claude Code's thinking budget to its own reasoning effort.
+
 Verify your key actually has access to the Messages API before relying on it —
 `/v1/messages` is newer than the classic `/v1/chat/completions` surface.
+
+### Codex（ChatGPT/Codex 订阅额度）
+
+后端是 icebear0828/codex-proxy（:8080，自带 Anthropic↔Codex 翻译，OAuth PKCE
+登录 ChatGPT 账号）。安装并完成一次登录后：
+
+```sh
+crouter codex              # 默认 gpt-5.6-terra
+crouter codex gpt-5.6-sol  # 会话级换模型
+```
+
+模型**不钉死**：目录是运行时从 Codex 后端拉取的（`GET /v1/models/catalog`，随
+账号套餐变化），provider 只给默认值，四档别名不设（回落默认）；切换用
+`crouter codex <model>`、会话内 `/model` 或 `ANTHROPIC_DEFAULT_*_MODEL`
+环境变量。注意 `crouter all` 模式下 PRE_START 不执行，需 icebear 常驻
+（launchd / .dmg）。
 
 ### OpenRouter
 

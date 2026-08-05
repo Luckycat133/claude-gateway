@@ -2,6 +2,116 @@
 
 All notable changes to this local setup are documented in this file.
 
+## [0.4.13] - 2026-08-04
+
+### Added
+- **`codex` provider (ChatGPT/Codex 订阅 via icebear0828/codex-proxy).**
+  `providers/codex.sh` — backend is `icebear0828/codex-proxy` on
+  `http://localhost:8080` (single-process Anthropic↔Codex translation layer,
+  OAuth PKCE login). `BASE_URL` per icebear's default port; `AUTH_MODE=none`
+  + `EXTRA_ENV` injecting the `pwd` placeholder (Claude Code requires a
+  non-empty credential; matches icebear's auto-generated `proxy_api_key` from
+  `config-loader.ts`). Models are **not pinned**: only `MODEL="gpt-5.6-terra"`
+  as the default, four tier aliases left unset (fallback to `MODEL`, default
+  is balanced so no flagship-quota waste), per the 2026-08-04 user
+  requirement. The runtime catalog (5.6-sol/terra/luna + 5.5/5.4/5.4-mini +
+  5.3-codex-spark + `-high/-low/-fast` suffix variants) is dynamic — verify
+  with `GET /v1/models/catalog`. Overrides: `crouter codex <model>`,
+  in-session `/model`, or `ANTHROPIC_DEFAULT_*_MODEL` env vars.
+  `PRE_START` probes `:8080` and dies with a launch hint when icebear is not
+  running (only runs in direct launch; `crouter all` does not execute
+  PRE_START — icebear must be kept alive via launchd / `.dmg` for the
+  unified gateway).
+- **Compatibility launcher `claude-codex`** (installed by `./install.sh`).
+- **Planning document `TASKS-chatgpt-provider.md`:** documents the
+  evaluation of 8 backend repositories, the rationale for picking icebear
+  over the alternatives, the in-flight verification needed to ship
+  `codex.sh`, and a 22-entry corrections log from the `/code-review max`
+  pass + 8-repository cross-verification.
+
+### Changed
+- **`openai` provider reworked to official-API-only.** `providers/openai.sh`
+  now targets OpenAI's official Anthropic-compatible Messages API
+  (`https://api.openai.com/v1/messages`) as a single credential surface — the
+  optional `OPENAI_DEFAULT_URL` org-gateway surface is removed. Models
+  updated to the current GPT-5.6 catalog per OpenAI's API docs:
+  `gpt-5.6-sol` / `gpt-5.6-terra` (default) / `gpt-5.6-luna` (all 1.05M ctx
+  / 128K max out); auth via Keychain service `openai-api-key` (matches the
+  `deepseek` house pattern); `EFFORT="high"`.
+- **README** documents the new `crouter codex` provider + `claude-codex`
+  shortcut, and notes that `openai` is now single-surface keychain-only
+  (no longer dual-source).
+- **CLAUDE.md** updates the providers list and the dual-source
+  enumeration (`anthropic` / `openrouter` only; `openai` is keychain-only).
+- **`test/smoke.sh`** asserts `codex` is listed with `none` auth and `openai`
+  with `keychain` auth; the dual-source list is narrowed to `anthropic` /
+  `openrouter`.
+
+### Fixed
+- **`antigravity-claude-proxy` model-cache corruption (local patch, not
+  upstream).** `src/cloudcode/model-api.js` had three related bugs that
+  caused intermittent `400 Invalid model: claude. Use /v1/models to see
+  available models.` errors even when the user's Antigravity account had
+  Claude quota fully available (100% unused per the official UI):
+  1. `populateModelCache()` would silently overwrite `validModels` with an
+     empty Set when `fetchAvailableModels()` returned a partial response
+     lacking `claude-*` ids (possible on quota-exhausted endpoints or
+     during backend endpoint fallbacks).
+  2. On fetch failure, the stale cache was kept intact, so the next request
+     would trust a list of ids that the backend may have since disabled.
+  3. `isValidModel()` rejected any id absent from cache without fail-open,
+     so a single bad fetch poisoned every subsequent Claude request until
+     the 24h cache TTL expired.
+  Patch (local only — proxy is in `antigravity-claude-proxy/`, which is
+  gitignored): keep the existing cache when a fetch returns zero supported
+  models; clear the cache on fetch failure so the next call retries; make
+  `isValidModel()` fail-open when an id is not in cache (let the upstream
+  API validate). Verified end-to-end: `POST /v1/messages` with
+  `model: claude-sonnet-4-6` returns a real Claude response (`stop_reason:
+  end_turn`, model echoed back as `claude-sonnet-4-6`), and the proxy log
+  shows the cache populated with 19 models including `claude-sonnet-4-6`.
+
+## [0.4.12] - 2026-08-04
+
+### Changed
+- **`openai` provider reworked to official-API-only.** `providers/openai.sh` now
+  targets OpenAI's official Anthropic-compatible Messages API
+  (`https://api.openai.com/v1/messages`) as a single credential surface — the
+  optional `OPENAI_DEFAULT_URL` org-gateway surface is removed. Models updated to
+  the current GPT-5.6 catalog per OpenAI's API docs: `gpt-5.6-sol` /
+  `gpt-5.6-terra` (default) / `gpt-5.6-luna` (all 1.05M ctx / 128K max out);
+  auth via Keychain
+  service `openai-api-key` (matches the `deepseek` house pattern); `EFFORT="high"`.
+
+## [0.4.14] - 2026-08-04
+
+### Fixed
+- **`openai` provider header shape (silent `crouter all` 401 + direct-launch
+  both-headers bug).** Added `_AUTH_SCHEME="bearer"` in `providers/openai.sh`
+  so `lib/launch.sh:70-78` takes the bearer-only branch (was falling into
+  the `*)` both-headers branch and emitting both `Authorization: Bearer` and
+  `x-api-key:`). OpenAI's compat Messages API rejects `x-api-key:`. Caught
+  by an ultracode audit pass on the 0.4.13 changes.
+- **`codex` `CONTEXT_TOKENS` was an order of magnitude low.** Was 272000
+  (Codex CLI's per-run cap), should be 1050000 — GPT-5.6 family ships with
+  a 1.05M-token context window per icebear's own `src/ollama/bridge.ts`
+  context table.
+- **`codex` `HEALTH_CHECK_URL`** pointed at `/`; now points at
+  `http://localhost:8080/health` (the endpoint icebear actually exposes
+  for probes — `src/routes/admin/health.ts`).
+- **`test/smoke.sh`** section heading updated — "Dual-source providers"
+  no longer lists `openai` (which is single-surface keychain now).
+
+### Added
+- **`test/header-shape.sh`** — non-hermetic integration test for providers
+  with non-Anthropic auth headers. Captures the headers `crouter openai`
+  sends to `api.openai.com` and asserts `Authorization: Bearer` is present
+  while `x-api-key:` is absent (OpenAI's compat Messages API rejects
+  x-api-key). Skips cleanly when prerequisites are missing (no keychain
+  entry, no `nc`, no `python3`). Run locally after editing
+  `providers/openai.sh` or `lib/launch.sh`; not part of the default
+  `./test/smoke.sh` CI gate.
+
 ## [0.4.11] - 2026-08-03
 
 ### Added

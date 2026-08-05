@@ -299,9 +299,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Dual-source providers (anthropic / openai / openrouter)
+# Providers with explicit AUTH mode assertions (anthropic / openai / openrouter / codex)
 # ---------------------------------------------------------------------------
-for _dp in anthropic openai openrouter; do
+for _dp in anthropic openai openrouter codex; do
   if "$GATEWAY" list 2>/dev/null | grep -q "^$_dp "; then
     ok "$_dp provider is listed"
   else
@@ -309,7 +309,9 @@ for _dp in anthropic openai openrouter; do
   fi
 done
 
-# anthropic/openai declare both surfaces -> AUTH column reads "dual".
+# anthropic declares both surfaces -> AUTH column reads "dual"; openai is
+# keychain-only now (official API only); openrouter declares a single API
+# surface; codex is none (icebear owns its auth).
 if "$GATEWAY" list 2>/dev/null | awk '$1=="anthropic"{print $(NF-1)}' | grep -q '^dual$'; then
   ok "anthropic reports dual-source auth"
 else
@@ -320,6 +322,18 @@ if "$GATEWAY" list 2>/dev/null | awk '$1=="openrouter"{print $(NF-1)}' | grep -q
   ok "openrouter reports single api-key auth"
 else
   bad "openrouter did not report single api-key auth"
+fi
+# openai is official-API-only now -> keychain auth, never "dual".
+if "$GATEWAY" list 2>/dev/null | awk '$1=="openai"{print $(NF-1)}' | grep -q '^keychain$'; then
+  ok "openai reports keychain auth"
+else
+  bad "openai did not report keychain auth"
+fi
+# codex uses icebear's proxy auth -> AUTH_MODE=none, never "dual".
+if "$GATEWAY" list 2>/dev/null | awk '$1=="codex"{print $(NF-1)}' | grep -q '^none$'; then
+  ok "codex reports none auth"
+else
+  bad "codex did not report none auth"
 fi
 
 # provider show must reveal the surface layout without leaking secrets.
