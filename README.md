@@ -331,6 +331,12 @@ becomes `.../api/v1/v1/messages` and 404s). Default model
 `nvidia/nemotron-3-ultra-550b-a55b:free` (free tier, no account credit consumed).
 Single auth surface (Bearer), so `crouter list` shows `apikey`, not `dual`.
 
+This configuration is verified to match OpenRouter's official Claude Code
+integration guide exactly: `ANTHROPIC_BASE_URL` is the bare `https://openrouter.ai/api`
+(no trailing `/v1`), the OpenRouter key is injected as `ANTHROPIC_AUTH_TOKEN`, and
+`ANTHROPIC_API_KEY` is explicitly empty. Ref:
+`openrouter.ai/docs/cookbook/coding-agents/claude-code-integration`.
+
 ```sh
 read -s "OPENROUTER_KEY?Paste OpenRouter API key: "; echo
 security add-generic-password -U -a "$USER" -s "openrouter-api-key" -w "$OPENROUTER_KEY"
