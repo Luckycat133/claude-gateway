@@ -325,7 +325,10 @@ crouter codex gpt-5.6-sol  # 会话级换模型
 
 ### OpenRouter
 
-Endpoint `https://openrouter.ai/api/v1`, default `anthropic/claude-sonnet-4`.
+Endpoint `https://openrouter.ai/api` (deliberately **no** trailing `/v1` — Claude
+Code appends `/v1/messages` itself, so the provider must omit it or the request
+becomes `.../api/v1/v1/messages` and 404s). Default model
+`nvidia/nemotron-3-ultra-550b-a55b:free` (free tier, no account credit consumed).
 Single auth surface (Bearer), so `crouter list` shows `apikey`, not `dual`.
 
 ```sh

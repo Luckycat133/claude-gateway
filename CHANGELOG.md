@@ -2,6 +2,27 @@
 
 All notable changes to this local setup are documented in this file.
 
+## [0.4.15] - 2026-08-05
+
+### Fixed
+- **`openrouter` provider double-`/v1` 404 (was causing Claude Code's
+  "model may not exist" error).** `BASE_URL`/`API_URL` were
+  `https://openrouter.ai/api/v1`; Claude Code appends its own `/v1/messages`,
+  producing `.../api/v1/v1/messages` → 404, and model validation against
+  `.../api/v1/v1/models` returned an HTML error page → "model may not exist /
+  run /model". Now `https://openrouter.ai/api` (no trailing `/v1`), matching
+  the README and `anthropic.sh`'s pattern. Verified by a mock-Claude run:
+  injected `ANTHROPIC_BASE_URL=https://openrouter.ai/api`,
+  `ANTHROPIC_AUTH_TOKEN` (Bearer) set, `ANTHROPIC_API_KEY` empty.
+
+### Changed
+- **`openrouter` default model locked to the free tier.** All four tiers
+  (`MODEL` + `MODEL_OPUS/SONNET/HAIKU/SUBAGENT`) set to
+  `nvidia/nemotron-3-ultra-550b-a55b:free`. Free `:free` models never consume
+  account credit; daily free-quota exhaustion returns a 429 rate-limit, not a
+  deduction. (Credit-limit = 0 is an OpenRouter *account* backend setting —
+  set it at openrouter.ai/settings, crouter can't toggle it.)
+
 ## [0.4.13] - 2026-08-04
 
 ### Added

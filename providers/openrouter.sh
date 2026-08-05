@@ -6,19 +6,19 @@
 PROVIDER_NAME="openrouter"
 PROVIDER_DESC="OpenRouter (unified gateway, Anthropic-compatible)"
 
-BASE_URL="https://openrouter.ai/api/v1"
-MODEL="anthropic/claude-sonnet-4"
+BASE_URL="https://openrouter.ai/api"
+MODEL="nvidia/nemotron-3-ultra-550b-a55b:free"
 CONTEXT_TOKENS="200000"
 
-MODEL_OPUS="anthropic/claude-opus-4"
-MODEL_SONNET="anthropic/claude-sonnet-4"
-MODEL_HAIKU="anthropic/claude-haiku-4"
-MODEL_SUBAGENT="anthropic/claude-sonnet-4"
+MODEL_OPUS="nvidia/nemotron-3-ultra-550b-a55b:free"
+MODEL_SONNET="nvidia/nemotron-3-ultra-550b-a55b:free"
+MODEL_HAIKU="nvidia/nemotron-3-ultra-550b-a55b:free"
+MODEL_SUBAGENT="nvidia/nemotron-3-ultra-550b-a55b:free"
 
 EFFORT="max"
 
 # Single auth surface: your OpenRouter API key (Bearer).
-API_URL="https://openrouter.ai/api/v1"
+API_URL="https://openrouter.ai/api"
 API_AUTH_TYPE="bearer"
 API_KEY_ENV="OPENROUTER_API_KEY"
 API_KEY_REF="openrouter-api-key"      # optional: store the key in macOS Keychain
