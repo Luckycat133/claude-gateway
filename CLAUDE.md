@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Run Smoke Tests**: `./test/smoke.sh`
 - **Install Local Binary & Compatibility Launchers**: `./install.sh`
-- **Lint Shell Scripts**: `shellcheck bin/crouter bin/crouter-compat install.sh test/smoke.sh providers/*.sh providers/lib/*.sh`
+- **Lint Shell Scripts**: `shellcheck bin/crouter bin/crouter-compat install.sh test/smoke.sh providers/*.sh lib/*.sh`
 - **Run Framework Entry Point**: `./bin/crouter list` (or `doctor`, `add <provider>`, `remove <provider> --name <service>`, `list keys <provider>`, `all`)
 
 ## Architecture & Code Structure
@@ -18,9 +18,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. **Self-Location**: `bin/crouter` dynamically resolves its absolute path following symlinks using `readlink` with `CDPATH=` to ensure safety across environments.
 2. **Configuration & Provider Contracts**: Sourcing `config.sh` (gitignored local overrides) followed by `providers/<name>.sh`. Providers set declarative variables:
    - `BASE_URL`, `MODEL`, `CONTEXT_TOKENS`, `EFFORT` (reasoning effort: `low`|`medium`|`high`|`xhigh`|`max`, passed to Claude Code as `--effort`)
+   - `CONTEXT_TOKENS`: upstream model's context window in tokens. Sets `CLAUDE_CODE_MAX_CONTEXT_TOKENS` at launch. If omitted, the variable is not injected and Claude Code uses its own default.
    - Model aliases: `MODEL_OPUS`, `MODEL_SONNET`, `MODEL_HAIKU`, `MODEL_SUBAGENT`
    - `AUTH_MODE`: `keychain`, `env`, `command`, `static`, `none`, or `keypool`
    - `AUTH_REFERENCE`: Keychain service name, environment variable name, or command
+   - `AUTH_KEYCHAIN_FALLBACK`: optional Keychain service name used when `AUTH_MODE=env` and the env var is unset (lets a provider accept both "export the key" and "store it in the Keychain" without a second AUTH_MODE).
    - Dual-source (`anthropic`/`openrouter`, replaces `AUTH_MODE`): `DEFAULT_URL`, `DEFAULT_AUTH_TYPE`, `DEFAULT_TOKEN_ENV`, `DEFAULT_TOKEN_ENV_FALLBACK` for the preferred account; `API_URL`, `API_AUTH_TYPE`, `API_KEY_ENV`, `API_KEY_REF` for the fallback key. `is_dual_source()` detects them; `load_provider()` must reset every one of these or values leak across providers.
    - Lifecycle hooks: `PRE_START`, `POST_STOP`, `HEALTH_CHECK_URL`
 3. **Lifecycle Hooks**: `PRE_START` hook runs prior to launch (e.g. `antigravity_ensure_gateway` auto-starts the local proxy and polls `/health`).
@@ -39,6 +41,6 @@ Subcommands are flat: `crouter <verb> [args]`. Verbs: `<provider> [<model>]` (de
 - `bin/keypool-proxy`: Local failover proxy. Legacy mode = `KEYPOOL_KEYS` x `KEYPOOL_TARGETS` (all keys sent as both `x-api-key` and Bearer). Candidate mode = `KEYPOOL_CANDIDATES` JSON (`[{url,type,token,label}]`) with per-candidate header shape; used by dual-source direct launches.
 - `bin/claude-*`: Compatibility launchers — symlinks to `bin/crouter-compat` that delegate to specific provider commands (the provider is derived from the invoked name). `install.sh` generates one per file in `providers/`, so adding a provider needs no edit there.
 - `providers/`: Provider definitions (`anthropic.sh`, `openai.sh`, `openrouter.sh`, `codex.sh` for ChatGPT/Codex 订阅 via icebear0828/codex-proxy, `minimax.sh`, `antigravity.sh` for Gemini, `antigravity-claude.sh` for Claude, `deepseek.sh`, `ollama.sh` for local/cloud Ollama models via its native Anthropic API).
-- `providers/lib/`: Shared provider utilities (`antigravity-common.sh` for proxy management).
+- `lib/`: Shared shell modules sourced by `bin/crouter` (`provider.sh`, `auth.sh`, `key-mgmt.sh`, `launch.sh`) plus `antigravity-common.sh` (proxy management, sourced by the two antigravity providers) and `route-build.js` (dependency-free Node; builds the gateway routes JSON and the keypool-proxy candidate array — subcommands `candidates`, `dual-candidates`, `combine`, `default-model`. The shell owns credential discovery; this file owns the JSON shapes).
 - `install.sh`: Creates executable symlinks in `$INSTALL_DIR` (`~/.local/bin`) and copies `config.example.sh` to `config.sh`.
 - `test/smoke.sh`: Hermetic offline smoke test suite (with stubs for `security(1)` / `node(1)` so key-management paths run without a real Keychain or Node).

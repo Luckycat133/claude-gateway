@@ -2,6 +2,69 @@
 
 All notable changes to this local setup are documented in this file.
 
+## [0.4.16] - 2026-08-06
+
+Housekeeping release: no intended change to how any provider launches. The
+routes JSON produced by `crouter all` and the environment injected into Claude
+Code were diffed before/after and are byte-identical, except for the two
+`openrouter` fixes noted below.
+
+### Fixed
+- **`crouter uninstall` left dangling symlinks.** The target list was hardcoded
+  and missed `claude-anthropic`, `claude-codex`, `claude-ollama`,
+  `claude-openai` and `claude-openrouter`. It is now derived from
+  `providers/*.sh` exactly as `install.sh` does, so the two stay in sync as
+  providers are added.
+- **`crouter provider show <name>` failed** with "unknown provider 'show'" — the
+  documented three-word form was never handled by the dispatcher. Both
+  `crouter provider <name>` and `crouter provider show <name>` now work.
+- **`openrouter` context window** was 200,000; the default model's real
+  `context_length` is 1,000,000. `CLAUDE_CODE_MAX_CONTEXT_TOKENS` was cutting
+  the usable window to a fifth.
+- **`:free` billing claim corrected** in the README and the 0.4.15 entry. A
+  `:free` model is free only within OpenRouter's daily allowance; beyond it,
+  requests keep the `:free` suffix and bill at the underlying paid rate. The
+  only hard zero-spend guarantee is a `$0` credit limit on the key
+  (openrouter.ai/settings/keys — account-side, not something crouter can set).
+
+### Changed
+- **Route/candidate JSON extracted to `lib/route-build.js`.** Four inline
+  `node -e '...'` blobs in `bin/crouter` and `lib/auth.sh` collapsed into one
+  readable file with subcommands `candidates`, `dual-candidates`, `combine` and
+  `default-model`, driven by a documented `CR_*` env contract. The shell still
+  owns credential discovery; the JS only owns the JSON shapes.
+- **`kc_get()` added to `lib/auth.sh`.** Every Keychain read now goes through
+  one helper instead of six copies of
+  `security find-generic-password -a "$USER" -s ... -w`.
+- **`providers/lib/antigravity-common.sh` moved to `lib/antigravity-common.sh`.**
+  It is a shared library, not a provider; `lib/` is where the other shared
+  modules live. Both antigravity providers now source it via `$ROOT_DIR/lib/`.
+- **`openrouter` no longer pretends to be dual-source.** It declared
+  `API_URL`/`API_AUTH_TYPE`/`API_KEY_ENV`/`API_KEY_REF`, which made
+  `is_dual_source()` route it through the two-account failover path only for it
+  to degrade back to a direct launch. It is now a single surface —
+  `AUTH_MODE="env"` resolving `$OPENROUTER_API_KEY` first and the
+  `openrouter-api-key` Keychain item second (same order, same Bearer header,
+  both paths verified). `crouter list` shows `env` instead of `apikey`.
+- **Redundant tier aliases dropped** from `openrouter.sh` and `ollama.sh`, which
+  set all four `MODEL_*` aliases to the same value as `MODEL`. `lib/provider.sh`
+  already falls back to `MODEL`; the fallback is now documented there.
+- **`_AUTH_SCHEME` is reset in `load_provider()`.** It was the one contract
+  variable the reset block missed, so it could leak between providers when
+  several are loaded in one shell (`crouter doctor`, `crouter all`).
+- **New `AUTH_KEYCHAIN_FALLBACK` field for `AUTH_MODE=env`.** Lets a provider
+  accept both "export the key" and "store it in the Keychain" without inventing
+  a second AUTH_MODE or embedding shell in the provider file. `openrouter`
+  migrated from `AUTH_MODE=command` (eval string) to `AUTH_MODE=env` +
+  `AUTH_KEYCHAIN_FALLBACK="openrouter-api-key"`.
+- **`CONTEXT_TOKENS` documented** in README and CLAUDE.md: it maps to
+  `CLAUDE_CODE_MAX_CONTEXT_TOKENS`; if omitted the variable is not injected
+  and Claude Code uses its own default.
+
+### Removed
+- **Dead `run_post_stop()`** in `bin/crouter` — never called from anywhere;
+  `lib/launch.sh` evaluates `POST_STOP` directly from its exit trap.
+
 ## [0.4.15] - 2026-08-05
 
 ### Fixed
@@ -18,10 +81,12 @@ All notable changes to this local setup are documented in this file.
 ### Changed
 - **`openrouter` default model locked to the free tier.** All four tiers
   (`MODEL` + `MODEL_OPUS/SONNET/HAIKU/SUBAGENT`) set to
-  `nvidia/nemotron-3-ultra-550b-a55b:free`. Free `:free` models never consume
+  `nvidia/nemotron-3-ultra-550b-a55b:free`. ~~Free `:free` models never consume
   account credit; daily free-quota exhaustion returns a 429 rate-limit, not a
-  deduction. (Credit-limit = 0 is an OpenRouter *account* backend setting —
-  set it at openrouter.ai/settings, crouter can't toggle it.)
+  deduction.~~ **Corrected in 0.4.16** — `:free` is only free inside the daily
+  allowance; past it, requests bill at the underlying paid rate. Credit-limit =
+  0 is an OpenRouter *account* backend setting — set it at
+  openrouter.ai/settings, crouter can't toggle it.
 
 ## [0.4.13] - 2026-08-04
 

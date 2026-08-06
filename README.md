@@ -125,13 +125,14 @@ Create `providers/<name>.sh` — no changes to the entry point are needed:
 PROVIDER_NAME="openrouter"
 BASE_URL="https://openrouter.ai/api"        # Anthropic-compatible endpoint
 MODEL="some/default-model"
-CONTEXT_TOKENS="200000"
+CONTEXT_TOKENS="200000"                     # upstream context_length (tokens) → CLAUDE_CODE_MAX_CONTEXT_TOKENS
 MODEL_OPUS=""                               # optional; default to MODEL
 MODEL_SONNET=""
 MODEL_HAIKU=""
 MODEL_SUBAGENT=""
 AUTH_MODE="keychain"                        # keychain | env | command | static | none | keypool
 AUTH_REFERENCE="my-openrouter-key"          # keychain item / env var name / command
+AUTH_KEYCHAIN_FALLBACK=""                   # optional Keychain service when AUTH_MODE=env and env var unset
 EXTRA_ENV=""                                # one KEY=VALUE per line
 EFFORT=""                                   # reasoning effort: low|medium|high|xhigh|max (-> claude --effort)
 PRE_START=""                                # optional lifecycle hooks
@@ -139,18 +140,16 @@ POST_STOP=""
 HEALTH_CHECK_URL=""                         # used by status/doctor
 ```
 
-`AUTH_MODE` semantics:
-
 | Mode | `AUTH_REFERENCE` means | Example |
 | --- | --- | --- |
 | `keychain` | macOS Keychain generic-password service name | `codex-minimax-token-plan` |
-| `env` | Name of an environment variable | `OPENROUTER_API_KEY` |
-| `command` | A command whose stdout is the token | `pass show openrouter` |
-| `static` | The literal (non-secret) token | `local-antigravity-proxy` |
+| `env` | Env var name; if unset, tries `AUTH_KEYCHAIN_FALLBACK` Keychain item | `OPENROUTER_API_KEY` |
+| `command` | Command whose stdout is the token | `pass show openrouter` |
+| `static` | Literal (non-secret) token | `local-antigravity-proxy` |
 | `none` | No credential injected | |
-| `keypool` | Space-separated Keychain service names (`AUTH_KEYS`); a local proxy rotates across them on 429/401 | `codex-minimax-token-plan` |
+| `keypool` | Space-separated Keychain services (`AUTH_KEYS`); local proxy rotates on 429/401 | `codex-minimax-token-plan` |
 
-## Dual-source providers: default account first, API key as fallback
+`CONTEXT_TOKENS` → injected as `CLAUDE_CODE_MAX_CONTEXT_TOKENS`; should match upstream `context_length`. Omitted = not injected (Claude Code default).
 
 `anthropic` and `openrouter` do not use `AUTH_MODE`. They declare up to
 two *credential surfaces* and crouter always spends the **default account's
@@ -328,8 +327,16 @@ crouter codex gpt-5.6-sol  # 会话级换模型
 Endpoint `https://openrouter.ai/api` (deliberately **no** trailing `/v1` — Claude
 Code appends `/v1/messages` itself, so the provider must omit it or the request
 becomes `.../api/v1/v1/messages` and 404s). Default model
-`nvidia/nemotron-3-ultra-550b-a55b:free` (free tier, no account credit consumed).
-Single auth surface (Bearer), so `crouter list` shows `apikey`, not `dual`.
+`nvidia/nemotron-3-ultra-550b-a55b:free`, whose real context window is 1M tokens.
+Single auth surface (Bearer): the key is read from `$OPENROUTER_API_KEY` if set,
+otherwise from the Keychain item `openrouter-api-key`, so `crouter list` shows
+`command`, never `dual`.
+
+**On `:free` billing.** A `:free` model is only free *within OpenRouter's daily
+free allowance*. Once that allowance is used up, requests keep the `:free`
+suffix but bill at the underlying model's paid rate. The only hard zero-spend
+guarantee is setting the key's credit limit to `$0` at
+openrouter.ai/settings/keys — an account-side setting crouter cannot toggle.
 
 This configuration is verified to match OpenRouter's official Claude Code
 integration guide exactly: `ANTHROPIC_BASE_URL` is the bare `https://openrouter.ai/api`
@@ -338,6 +345,9 @@ integration guide exactly: `ANTHROPIC_BASE_URL` is the bare `https://openrouter.
 `openrouter.ai/docs/cookbook/coding-agents/claude-code-integration`.
 
 ```sh
+# Either export the key ...
+export OPENROUTER_API_KEY="sk-or-..."
+# ... or store it in the Keychain (checked when the env var is unset):
 read -s "OPENROUTER_KEY?Paste OpenRouter API key: "; echo
 security add-generic-password -U -a "$USER" -s "openrouter-api-key" -w "$OPENROUTER_KEY"
 unset OPENROUTER_KEY

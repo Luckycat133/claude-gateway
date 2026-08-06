@@ -38,6 +38,7 @@ done
 BIN_DIR=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$BIN_DIR/.." && pwd)
 PROVIDERS_DIR=$ROOT_DIR/providers
+LIB_DIR=$ROOT_DIR/lib
 
 # ---------------------------------------------------------------------------
 # Version (single source of truth: $ROOT_DIR/VERSION)
@@ -70,7 +71,7 @@ usage() {
 # POSIX functions that read globals only at call time.
 # ---------------------------------------------------------------------------
 for _mod in provider auth key-mgmt launch; do
-  . "$ROOT_DIR/lib/$_mod.sh"
+  . "$LIB_DIR/$_mod.sh"
 done
 
 
@@ -82,10 +83,8 @@ run_pre_start() {
   eval "$PRE_START" || die "PRE_START hook failed for '$PROVIDER_NAME'"
 }
 
-run_post_stop() {
-  [ -n "$POST_STOP" ] || { info "provider '$PROVIDER_NAME' has no POST_STOP hook."; return 0; }
-  eval "$POST_STOP"
-}
+# POST_STOP has no wrapper here on purpose: lib/launch.sh evaluates it directly
+# from its exit trap, which is the only place it can run after Claude Code exits.
 
 # ---------------------------------------------------------------------------
 # Commands
@@ -420,7 +419,13 @@ cmd_uninstall() {
     esac
   done
   _dir=${INSTALL_DIR:-$HOME/.local/bin}
-  _targets="crouter claude-minimax claude-antigravity claude-antigravity-claude claude-deepseek"
+  # Same derivation as install.sh: one claude-<provider> shortcut per provider
+  # file, so a new provider is uninstalled without editing this list.
+  _targets="crouter"
+  for _pf in "$PROVIDERS_DIR"/*.sh; do
+    [ -f "$_pf" ] || continue
+    _targets="$_targets claude-$(basename "$_pf" .sh)"
+  done
 
   if [ "$_yes" -eq 0 ]; then
     printf 'remove crouter and provider shortcuts from %s? [y/N] ' "$_dir" >/dev/tty
@@ -447,6 +452,8 @@ cmd_uninstall() {
 # ---------------------------------------------------------------------------
 
 # Build a routes JSON file covering every provider. Prints the temp file path.
+# Credential discovery lives here (shell owns Keychain/env); the JSON shapes
+# live in lib/route-build.js.
 build_all_routes() {
   _rt=$(mktemp -t call-routes.XXXXXX)
   for _n in $(provider_names); do
@@ -456,21 +463,23 @@ build_all_routes() {
       _kpool=""
       if [ "${AUTH_MODE:-}" = "keypool" ]; then
         for _ref in ${AUTH_KEYS:-} ${PLUS_KEYS:-}; do
-          _t=$(security find-generic-password -a "$USER" -s "$_ref" -w 2>/dev/null)
+          _t=$(kc_get "$_ref")
           [ -n "$_t" ] && _kpool="$_kpool $_t"
         done
-        _kpool=$(echo "$_kpool" | sed 's/^ *//; s/ *$//')
       fi
       # API-surface credential (env var, then keychain service, then legacy AUTH_*).
       _api_key=""
       if [ -n "${API_KEY_ENV:-}" ] && [ -n "$(printenv "$API_KEY_ENV" 2>/dev/null)" ]; then
         _api_key=$(printenv "$API_KEY_ENV")
       elif [ -n "${API_KEY_REF:-}" ]; then
-        _api_key=$(security find-generic-password -a "$USER" -s "$API_KEY_REF" -w 2>/dev/null)
-      elif [ "${AUTH_MODE:-}" = "keychain" ] && [ -n "${AUTH_REFERENCE:-}" ]; then
-        _api_key=$(security find-generic-password -a "$USER" -s "$AUTH_REFERENCE" -w 2>/dev/null)
-      elif [ "${AUTH_MODE:-}" = "static" ]; then
-        _api_key="${AUTH_REFERENCE:-}"
+        _api_key=$(kc_get "$API_KEY_REF")
+      else
+        case "${AUTH_MODE:-}" in
+          keychain) [ -n "${AUTH_REFERENCE:-}" ] && _api_key=$(kc_get "$AUTH_REFERENCE") ;;
+          env)      [ -n "${AUTH_REFERENCE:-}" ] && _api_key=$(printenv "$AUTH_REFERENCE" 2>/dev/null) ;;
+          command)  [ -n "${AUTH_REFERENCE:-}" ] && _api_key=$(eval "$AUTH_REFERENCE" 2>/dev/null) ;;
+          static)   _api_key="${AUTH_REFERENCE:-}" ;;
+        esac
       fi
       # DEFAULT-surface token (subscription OAuth, or a configured gateway token).
       _def_token=""
@@ -491,61 +500,29 @@ build_all_routes() {
         done
         IFS="$_ifs"
       fi
-      # Collect models (dedup, default then aliases).
-      _models=""
-      for _m in "${MODEL:-}" "${MODEL_OPUS:-}" "${MODEL_SONNET:-}" "${MODEL_HAIKU:-}" "${MODEL_SUBAGENT:-}"; do
-        [ -n "$_m" ] || continue
-        case "$_models" in *" $_m "*|"$_m "*|*" $_m"|"$_m") ;; *) _models="$_models $_m" ;; esac
-      done
-      _models=$(echo "$_models" | sed 's/^ *//; s/ *$//')
+      # Candidate models: default first, then the tier aliases, then whatever is
+      # pulled locally for ollama. route-build.js dedups and keeps this order.
+      _models="${MODEL:-} ${MODEL_OPUS:-} ${MODEL_SONNET:-} ${MODEL_HAIKU:-} ${MODEL_SUBAGENT:-}"
       if [ "$PROVIDER_NAME" = "ollama" ] && command -v ollama >/dev/null 2>&1; then
-        for _om in $(ollama list 2>/dev/null | awk 'NR>1{print $1}'); do
-          [ -n "$_om" ] || continue
-          case "$_models" in *" $_om "*|"$_om "*|*" $_om"|"$_om") ;; *) _models="$_models $_om" ;; esac
-        done
-        _models=$(echo "$_models" | sed 's/^ *//; s/ *$//')
+        _models="$_models $(ollama list 2>/dev/null | awk 'NR>1{print $1}')"
       fi
-      # Build candidates array (JSON). DEFAULT surface is tried first, API second;
-      # each candidate carries its own URL + auth so the gateway fails over live.
-      PROVIDER_NAME="$PROVIDER_NAME" \
-      DEFAULT_URL="${DEFAULT_URL:-$BASE_URL}" DEFAULT_AUTH_TYPE="${DEFAULT_AUTH_TYPE:-bearer}" DEF_TOKEN="$_def_token" \
-      API_URL="${API_URL:-$BASE_URL}" API_AUTH_TYPE="${API_AUTH_TYPE:-x-api-key}" API_KEY="$_api_key" \
-      AUTH_MODE2="$AUTH_MODE" NONE_TOKEN="$_te" NONE_EXTRA="$_extra" MODELS_JOINED="$_models" KEYPOOL_KEYS_JOINED="$_kpool" \
-      "$NODE_BIN" -e '
-        const p=process.env.PROVIDER_NAME;
-        const models=(process.env.MODELS_JOINED||"").split(/\s+/).filter(Boolean);
-        const cand=[];
-        const kp=(process.env.KEYPOOL_KEYS_JOINED||"").split(/\s+/).filter(Boolean);
-        if(kp.length){
-          // keypool: every key is its own candidate (order: main keys, then plus keys).
-          for(const k of kp) cand.push({url:process.env.API_URL, auth:{type:"x-api-key", token:k}, extra_env:[]});
-        } else {
-          // dual-source: preferred account first, API key fallback.
-          if(process.env.DEF_TOKEN) cand.push({url:process.env.DEFAULT_URL, auth:{type:process.env.DEFAULT_AUTH_TYPE||"bearer", token:process.env.DEF_TOKEN}, extra_env:[]});
-          if(process.env.API_KEY) cand.push({url:process.env.API_URL, auth:{type:process.env.API_AUTH_TYPE||"x-api-key", token:process.env.API_KEY}, extra_env:[]});
-          else if(process.env.AUTH_MODE2==="none"){
-            const extra=(process.env.NONE_EXTRA||"").split(/\s+/).filter(Boolean);
-            cand.push({url:process.env.API_URL, auth:{type:"none", token:process.env.NONE_TOKEN||""}, extra_env:extra});
-          }
-        }
-        if(cand.length===0) process.exit(0);
-        process.stdout.write(JSON.stringify({prefix:p, base_url:process.env.API_URL, candidates:cand, models})+String.fromCharCode(10));
-      '
+
+      CR_PREFIX="$PROVIDER_NAME" CR_MODELS="$_models" CR_KEYPOOL_KEYS="$_kpool" \
+      CR_DEFAULT_URL="${DEFAULT_URL:-$BASE_URL}" CR_DEFAULT_TYPE="${DEFAULT_AUTH_TYPE:-}" CR_DEFAULT_TOKEN="$_def_token" \
+      CR_API_URL="${API_URL:-$BASE_URL}" CR_API_TYPE="${API_AUTH_TYPE:-}" CR_API_KEY="$_api_key" \
+      CR_AUTH_MODE="${AUTH_MODE:-}" CR_AUTH_SCHEME="${_AUTH_SCHEME:-}" \
+      CR_NONE_TOKEN="$_te" CR_NONE_EXTRA="$_extra" \
+        "$NODE_BIN" "$LIB_DIR/route-build.js" candidates
     ) >> "$_rt"
   done
   _arr=$(mktemp -t call-routes-arr.XXXXXX)
-  "$NODE_BIN" -e '
-    const fs=require("fs");
-    const lines=fs.readFileSync(process.argv[1],"utf8").split("\n").filter(Boolean);
-    const arr=lines.map(l=>JSON.parse(l));
-    fs.writeFileSync(process.argv[2], JSON.stringify(arr,null,2));
-  ' "$_rt" "$_arr"
+  "$NODE_BIN" "$LIB_DIR/route-build.js" combine "$_rt" "$_arr"
   rm -f "$_rt"
   echo "$_arr"
 }
 
 _default_namespaced_model() {
-  "$NODE_BIN" -e 'const a=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const r=a[0];process.stdout.write((r&&r.prefix||"")+"/"+((r&&r.models&&r.models[0])||""));' "$1"
+  "$NODE_BIN" "$LIB_DIR/route-build.js" default-model "$1"
 }
 
 cmd_all() {
@@ -602,6 +579,9 @@ case $cmd in
   add)            [ $# -ge 1 ] || die "usage: crouter add <provider> [--surface main|plus] [--name <service>]"; cmd_add_key "$@" ;;
   remove)         [ $# -ge 1 ] || die "usage: crouter remove <provider> --name <service> [--surface main|plus]"; cmd_remove_key "$@" ;;
   provider)
+    # Accept both `crouter provider <name>` and the documented
+    # `crouter provider show <name>`.
+    [ "${1:-}" = show ] && shift
     [ $# -ge 1 ] || die "usage: crouter provider show <provider>"
     cmd_provider_show "$1" ;;
   config)

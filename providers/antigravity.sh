@@ -1,6 +1,6 @@
 #!/bin/sh
 # Provider: Gemini models through the local Antigravity compatibility proxy.
-. "$PROVIDERS_DIR/lib/antigravity-common.sh"
+. "$ROOT_DIR/lib/antigravity-common.sh"
 
 PROVIDER_NAME="antigravity"
 PROVIDER_DESC="Gemini models via the local Antigravity proxy"

@@ -8,20 +8,19 @@ PROVIDER_DESC="OpenRouter (unified gateway, Anthropic-compatible)"
 
 BASE_URL="https://openrouter.ai/api"
 MODEL="nvidia/nemotron-3-ultra-550b-a55b:free"
-CONTEXT_TOKENS="200000"
+CONTEXT_TOKENS="1000000"
 
-MODEL_OPUS="nvidia/nemotron-3-ultra-550b-a55b:free"
-MODEL_SONNET="nvidia/nemotron-3-ultra-550b-a55b:free"
-MODEL_HAIKU="nvidia/nemotron-3-ultra-550b-a55b:free"
-MODEL_SUBAGENT="nvidia/nemotron-3-ultra-550b-a55b:free"
+# Every Claude tier maps to MODEL (see lib/provider.sh).
 
 EFFORT="max"
 
-# Single auth surface: your OpenRouter API key (Bearer).
-API_URL="https://openrouter.ai/api"
-API_AUTH_TYPE="bearer"
-API_KEY_ENV="OPENROUTER_API_KEY"
-API_KEY_REF="openrouter-api-key"      # optional: store the key in macOS Keychain
+# Single auth surface: your OpenRouter API key, sent as Authorization: Bearer.
+# Env var first, macOS Keychain second — same order the old dual-source fields
+# resolved in, without pretending there are two accounts to fail over between.
+AUTH_MODE="env"
+AUTH_REFERENCE="OPENROUTER_API_KEY"
+AUTH_KEYCHAIN_FALLBACK="openrouter-api-key"
+_AUTH_SCHEME="bearer"
 
 # OpenRouter requires ANTHROPIC_API_KEY to be empty to avoid an auth conflict.
 EXTRA_ENV="ANTHROPIC_API_KEY=

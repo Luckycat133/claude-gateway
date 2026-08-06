@@ -23,12 +23,8 @@ BASE_URL="http://localhost:11434"
 MODEL="glm-4.7-flash"
 CONTEXT_TOKENS="65536"
 
-# All Claude tiers map to the single default model unless overridden per session
-# or aliased with `ollama cp`. Adjust to whatever you have pulled locally.
-MODEL_OPUS="glm-4.7-flash"
-MODEL_SONNET="glm-4.7-flash"
-MODEL_HAIKU="glm-4.7-flash"
-MODEL_SUBAGENT="glm-4.7-flash"
+# All Claude tiers map to MODEL unless overridden per session or aliased with
+# `ollama cp` (see lib/provider.sh). Adjust to whatever you have pulled locally.
 
 # Ollama ignores the auth token value but Claude Code requires a non-empty one.
 # `none` auth mode leaves it unset, so inject the dummy token (and a matching

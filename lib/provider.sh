@@ -22,7 +22,7 @@ load_provider() {
   # loaded in the same shell (crouter doctor / all).
   PROVIDER_NAME= PROVIDER_DESC= BASE_URL= MODEL=
   MODEL_OPUS= MODEL_SONNET= MODEL_HAIKU= MODEL_SUBAGENT=
-  CONTEXT_TOKENS= AUTH_MODE=none AUTH_REFERENCE=
+  CONTEXT_TOKENS= AUTH_MODE=none AUTH_REFERENCE= AUTH_KEYCHAIN_FALLBACK= _AUTH_SCHEME=
   EXTRA_ENV= PRE_START= POST_STOP= HEALTH_CHECK_URL= EFFORT=
   AUTH_KEYS= PLUS_URL= PLUS_KEYS=
   # Dual-source contract (anthropic/openai/openrouter).
@@ -34,6 +34,9 @@ load_provider() {
   PROVIDER_NAME=${PROVIDER_NAME:-$_name}
   [ -n "$BASE_URL" ] || die "provider '$_name': BASE_URL is required"
   [ -n "$MODEL" ]    || die "provider '$_name': MODEL is required"
+  # The tier aliases are optional: a provider that serves one model for every
+  # tier just sets MODEL and inherits it here. Only declare an alias when it
+  # actually differs (see providers/anthropic.sh).
   MODEL_OPUS=${MODEL_OPUS:-$MODEL}
   MODEL_SONNET=${MODEL_SONNET:-$MODEL}
   MODEL_HAIKU=${MODEL_HAIKU:-$MODEL}

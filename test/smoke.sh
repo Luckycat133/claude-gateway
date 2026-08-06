@@ -179,7 +179,7 @@ chmod +x "$GATEWAY_SH"
 FAKE_ROOT="$MOCK_DIR/repo"
 mkdir -p "$FAKE_ROOT/bin" "$FAKE_ROOT/providers" "$FAKE_ROOT/lib"
 cp "$GATEWAY" "$FAKE_ROOT/bin/crouter"
-cp "$ROOT_DIR/lib/"*.sh "$FAKE_ROOT/lib/" 2>/dev/null || true
+cp "$ROOT_DIR/lib/"*.sh "$ROOT_DIR/lib/"*.js "$FAKE_ROOT/lib/" 2>/dev/null || true
 cp "$FAKE_PROVIDERS_DIR/demo.sh" "$FAKE_ROOT/providers/demo.sh"
 printf '0.4.0\n' > "$FAKE_ROOT/VERSION"
 
@@ -204,9 +204,8 @@ printf 'fake-secret-1' > "$MOCK_DIR/kc/demo-key-1"
 for _p in antigravity antigravity-claude deepseek minimax; do
   cp "$ROOT_DIR/providers/$_p.sh" "$FAKE_ROOT/providers/$_p.sh" 2>/dev/null || true
 done
-# antigravity.sh sources lib/antigravity-common.sh; preserve that.
-mkdir -p "$FAKE_ROOT/providers/lib"
-cp "$ROOT_DIR/providers/lib/antigravity-common.sh" "$FAKE_ROOT/providers/lib/" 2>/dev/null || true
+# antigravity.sh sources lib/antigravity-common.sh, which the lib/*.sh copy above
+# already placed in the fake root.
 
 # Wrapper that runs the fake-rooted gateway with our fake security/node on PATH.
 FAKE_GW="$FAKE_ROOT/bin/crouter"
@@ -317,11 +316,11 @@ if "$GATEWAY" list 2>/dev/null | awk '$1=="anthropic"{print $(NF-1)}' | grep -q 
 else
   bad "anthropic did not report dual-source auth"
 fi
-# openrouter has a single API surface -> "apikey", never "dual".
-if "$GATEWAY" list 2>/dev/null | awk '$1=="openrouter"{print $(NF-1)}' | grep -q '^apikey$'; then
-  ok "openrouter reports single api-key auth"
+# openrouter has a single API surface (env var, then Keychain fallback) -> never "dual".
+if "$GATEWAY" list 2>/dev/null | awk '$1=="openrouter"{print $(NF-1)}' | grep -q '^env$'; then
+  ok "openrouter reports single-surface auth"
 else
-  bad "openrouter did not report single api-key auth"
+  bad "openrouter did not report single-surface auth"
 fi
 # openai is official-API-only now -> keychain auth, never "dual".
 if "$GATEWAY" list 2>/dev/null | awk '$1=="openai"{print $(NF-1)}' | grep -q '^keychain$'; then

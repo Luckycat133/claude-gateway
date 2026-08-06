@@ -2,11 +2,15 @@
 # Auth resolution, health checks, and the keypool proxy launcher.
 # Sourced by bin/crouter. Functions only read these globals at call time:
 # AUTH_MODE, AUTH_REFERENCE, PLUS_URL, PLUS_KEYS, AUTH_KEYS, BASE_URL, USER,
-# PROVIDER_NAME, BIN_DIR, NODE_BIN, LOG_DIR, ROOT_DIR.
+# PROVIDER_NAME, BIN_DIR, LIB_DIR, NODE_BIN, LOG_DIR, ROOT_DIR.
 
 # ---------------------------------------------------------------------------
 # Auth. The secret only ever lives in AUTH_TOKEN inside this process.
 # ---------------------------------------------------------------------------
+# Read a secret out of the macOS login Keychain. Prints nothing (rc 1) when the
+# item does not exist, so callers can treat "missing" as "empty".
+kc_get() { security find-generic-password -a "$USER" -s "$1" -w 2>/dev/null; }
+
 # Keychain availability cache (disk-backed): avoids repeating `security` lookups.
 _kc_cache_dir() { printf '%s/.kc-cache' "${LOG_DIR:-$ROOT_DIR/logs}"; }
 _kc_state() {
@@ -24,12 +28,17 @@ resolve_auth() {
   AUTH_TOKEN=
   case $AUTH_MODE in
     keychain)
-      AUTH_TOKEN=$(security find-generic-password -a "$USER" -s "$AUTH_REFERENCE" -w 2>/dev/null)
+      AUTH_TOKEN=$(kc_get "$AUTH_REFERENCE")
       [ -n "$AUTH_TOKEN" ] || die "keychain item '$AUTH_REFERENCE' not found (provider '$PROVIDER_NAME')"
       ;;
     env)
       AUTH_TOKEN=$(printenv "$AUTH_REFERENCE" 2>/dev/null)
-      [ -n "$AUTH_TOKEN" ] || die "environment variable '$AUTH_REFERENCE' is empty (provider '$PROVIDER_NAME')"
+      # Optional Keychain fallback: lets a provider accept both "export the key"
+      # and "store it in the Keychain" without inventing a second AUTH_MODE.
+      if [ -z "$AUTH_TOKEN" ] && [ -n "${AUTH_KEYCHAIN_FALLBACK:-}" ]; then
+        AUTH_TOKEN=$(kc_get "$AUTH_KEYCHAIN_FALLBACK")
+      fi
+      [ -n "$AUTH_TOKEN" ] || die "provider '$PROVIDER_NAME': no key in \$$AUTH_REFERENCE${AUTH_KEYCHAIN_FALLBACK:+ or keychain item '$AUTH_KEYCHAIN_FALLBACK'}"
       ;;
     command)
       AUTH_TOKEN=$(eval "$AUTH_REFERENCE") ||
@@ -83,7 +92,7 @@ resolve_dual_source() {
   if [ -n "${API_KEY_ENV:-}" ] && [ -n "$(printenv "$API_KEY_ENV" 2>/dev/null)" ]; then
     _DUAL_API_TOKEN=$(printenv "$API_KEY_ENV")
   elif [ -n "${API_KEY_REF:-}" ]; then
-    _DUAL_API_TOKEN=$(security find-generic-password -a "$USER" -s "$API_KEY_REF" -w 2>/dev/null)
+    _DUAL_API_TOKEN=$(kc_get "$API_KEY_REF")
   fi
 
   [ -n "$_DUAL_DEF_TOKEN" ] && _DUAL_COUNT=$((_DUAL_COUNT + 1))
@@ -115,14 +124,9 @@ start_dual_failover() {
   fi
 
   _cands=$(
-    DEF_URL="${DEFAULT_URL:-$BASE_URL}" DEF_TYPE="${DEFAULT_AUTH_TYPE:-bearer}" DEF_TOKEN="$_DUAL_DEF_TOKEN" \
-    AP_URL="${API_URL:-$BASE_URL}" AP_TYPE="${API_AUTH_TYPE:-x-api-key}" AP_TOKEN="$_DUAL_API_TOKEN" \
-    "$NODE_BIN" -e '
-      const c=[];
-      if(process.env.DEF_TOKEN) c.push({url:process.env.DEF_URL, type:process.env.DEF_TYPE, token:process.env.DEF_TOKEN, label:"default-account"});
-      if(process.env.AP_TOKEN) c.push({url:process.env.AP_URL, type:process.env.AP_TYPE, token:process.env.AP_TOKEN, label:"api-key"});
-      process.stdout.write(JSON.stringify(c));
-    '
+    CR_DEFAULT_URL="${DEFAULT_URL:-$BASE_URL}" CR_DEFAULT_TYPE="${DEFAULT_AUTH_TYPE:-bearer}" CR_DEFAULT_TOKEN="$_DUAL_DEF_TOKEN" \
+    CR_API_URL="${API_URL:-$BASE_URL}" CR_API_TYPE="${API_AUTH_TYPE:-x-api-key}" CR_API_KEY="$_DUAL_API_TOKEN" \
+      "$NODE_BIN" "$LIB_DIR/route-build.js" dual-candidates
   )
 
   _out=$(mktemp -t dualpool.XXXXXX)
@@ -167,7 +171,7 @@ start_keypool() {
   _plus_pool=""
   if [ -n "${PLUS_URL:-}" ] && [ -n "${PLUS_KEYS:-}" ]; then
     for _ref in $PLUS_KEYS; do
-      _t=$(security find-generic-password -a "$USER" -s "$_ref" -w 2>/dev/null)
+      _t=$(kc_get "$_ref")
       [ -n "$_t" ] || die "keychain item '$_ref' not found (provider '$PROVIDER_NAME')"
       _plus_pool="$_plus_pool $_t"
     done
@@ -176,7 +180,7 @@ start_keypool() {
 
   _main_pool=""
   for _ref in $AUTH_KEYS; do
-    _t=$(security find-generic-password -a "$USER" -s "$_ref" -w 2>/dev/null)
+    _t=$(kc_get "$_ref")
     [ -n "$_t" ] || die "keychain item '$_ref' not found (provider '$PROVIDER_NAME')"
     _main_pool="$_main_pool $_t"
   done
@@ -261,7 +265,14 @@ check_auth() {
       [ "$_st" = ok ]
       ;;
     env)
-      _v=$(printenv "$AUTH_REFERENCE" 2>/dev/null); [ -n "$_v" ] ;;
+      _v=$(printenv "$AUTH_REFERENCE" 2>/dev/null)
+      if [ -n "$_v" ]; then
+        true
+      elif [ -n "${AUTH_KEYCHAIN_FALLBACK:-}" ]; then
+        security find-generic-password -a "$USER" -s "$AUTH_KEYCHAIN_FALLBACK" >/dev/null 2>&1
+      else
+        false
+      fi ;;
     command)
       _v=$(eval "$AUTH_REFERENCE" 2>/dev/null) && [ -n "$_v" ] ;;
     static|none)

@@ -2,5 +2,17 @@ logs/
 .state/
 config.sh
 antigravity-claude-proxy/
-.workbuddy/
 .DS_Store
+
+# Scratch directories that other AI coding tools drop into any repo they scan
+# (.adal, .augment, .crush, .roo, .windsurf, ... — 50+ and growing). Ignore all
+# dot-directories and re-include the ones this repo actually tracks.
+.*/
+!.github/
+
+# Local-only working files: skill checkouts and personal task/planning notes.
+data/
+skills/
+skills-lock.json
+TASKS-*.md
+REFACTOR-PROMPT.md

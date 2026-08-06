@@ -1,6 +1,6 @@
 #!/bin/sh
 # Provider: Claude models through the local Antigravity compatibility proxy.
-. "$PROVIDERS_DIR/lib/antigravity-common.sh"
+. "$ROOT_DIR/lib/antigravity-common.sh"
 
 PROVIDER_NAME="antigravity-claude"
 PROVIDER_DESC="Claude models via the local Antigravity proxy"
