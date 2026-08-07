@@ -6,18 +6,16 @@ PROVIDER_NAME="antigravity-claude"
 PROVIDER_DESC="Claude models via the local Antigravity proxy"
 
 BASE_URL=$(antigravity_base_url)
-MODEL="claude-sonnet-4-6"
+MODEL="claude-sonnet-5"
 CONTEXT_TOKENS="200000"
 
-MODEL_OPUS="claude-opus-4-6-thinking"
-MODEL_SONNET="claude-sonnet-4-6"
-MODEL_HAIKU="claude-sonnet-4-6"
-MODEL_SUBAGENT="claude-sonnet-4-6"
+MODEL_OPUS="claude-opus-5-thinking"
+MODEL_SONNET="claude-sonnet-5"
+MODEL_HAIKU="claude-sonnet-5"
+MODEL_SUBAGENT="claude-sonnet-5"
 
-# Reasoning effort passed to Claude Code via --effort (low|medium|high|xhigh|max).
 EFFORT="medium"
 
-# The proxy authenticates upstream itself; the token is a local placeholder.
 AUTH_MODE="static"
 AUTH_REFERENCE="local-antigravity-proxy"
 

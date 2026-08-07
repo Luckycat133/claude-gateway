@@ -7,7 +7,7 @@ PROVIDER_NAME="openrouter"
 PROVIDER_DESC="OpenRouter (unified gateway, Anthropic-compatible)"
 
 BASE_URL="https://openrouter.ai/api"
-MODEL="nvidia/nemotron-3-ultra-550b-a55b:free"
+MODEL="deepseek/deepseek-r1-0528:free"
 CONTEXT_TOKENS="1000000"
 
 # Every Claude tier maps to MODEL (see lib/provider.sh).

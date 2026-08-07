@@ -493,6 +493,76 @@ Note: Ollama defaults a model's context window small; agentic Claude Code needs 
 
 > **Verified (2026-08-02):** started `ollama serve` and ran `crouter ollama --model qwen3.5:2b -p "Reply with exactly one word: pong"` end-to-end — Claude Code connected via the injected `ANTHROPIC_BASE_URL=http://localhost:11434` + `ANTHROPIC_AUTH_TOKEN=ollama` and returned `pong`. No proxy, no API key.
 
+### DashScope (Alibaba Cloud Model Studio / Qwen)
+
+Native Anthropic-compatible Messages API endpoint — **no proxy required**. Alibaba Cloud's DashScope platform exposes `/v1/messages` at `https://dashscope.aliyuncs.com/compatible-mode/v1/messages` with Bearer token auth. Models include Qwen 2.5 / 3 series (Max/Plus/Turbo/Long). Context: 32K for Max/Plus/Turbo, 10M for Qwen-Long.
+
+```sh
+# Store API key in Keychain (service name: dashscope-api-key)
+read -s "DASHSCOPE_KEY?Paste DashScope API key: "; echo
+security add-generic-password -U -a "$USER" -s "dashscope-api-key" -w "$DASHSCOPE_KEY"
+unset DASHSCOPE_KEY
+
+crouter dashscope
+```
+
+| Claude Code selection | Qwen model |
+| --- | --- |
+| Default, `/model sonnet`, subagents | `qwen-plus` |
+| `/model opus` | `qwen-max` |
+| `/model haiku` | `qwen-turbo` |
+
+Reasoning effort defaults to `medium` (Qwen3 models support native thinking).
+
+### Vertex AI (Google Cloud)
+
+Vertex AI does not natively speak the Anthropic Messages API. We front it with the **vertex2anthropic** proxy (https://github.com/stackia/vertex2anthropic) which converts Anthropic `/v1/messages` → Vertex AI `rawPredict`/`streamRawPredict`. Auth uses Google Cloud ADC (`gcloud auth application-default login`).
+
+```sh
+# One-time: clone the proxy
+git clone https://github.com/stackia/vertex2anthropic ~/.local/share/vertex2anthropic
+# Or set VERTEX_PROXY_DIR in config.sh to your clone location
+
+# Authenticate with Google Cloud
+gcloud auth application-default login
+# Optionally set default region:
+gcloud config set ai/region us-central1
+
+crouter vertex
+```
+
+| Claude Code selection | Vertex AI model |
+| --- | --- |
+| Default, `/model sonnet`, subagents | `claude-3-5-sonnet-v2@20241022` |
+| `/model opus` | `claude-3-opus@20241022` |
+| `/model haiku` | `claude-3-5-haiku@20241022` |
+
+Reasoning effort defaults to `max`. The proxy auto-starts on `PRE_START` and shuts down on `POST_STOP`.
+
+### AWS Bedrock
+
+AWS Bedrock uses its own Converse API. We front it with a local **bedrock-proxy** (https://github.com/jparkerweb/bedrock-proxy-endpoint) which converts Anthropic `/v1/messages` → Bedrock `Converse`/`ConverseStream`. Auth uses standard AWS credential chain (`aws configure`, IAM role, env vars).
+
+```sh
+# One-time: clone the proxy
+git clone https://github.com/jparkerweb/bedrock-proxy-endpoint ~/.local/share/bedrock-proxy
+# Or set BEDROCK_PROXY_DIR in config.sh to your clone location
+
+# Authenticate with AWS
+aws configure  # or set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+aws configure set region us-east-1
+
+crouter bedrock
+```
+
+| Claude Code selection | Bedrock model |
+| --- | --- |
+| Default, `/model sonnet`, subagents | `anthropic.claude-3-5-sonnet-20241022-v2:0` |
+| `/model opus` | `anthropic.claude-3-opus-20240229-v1:0` |
+| `/model haiku` | `anthropic.claude-3-5-haiku-20241022-v1:0` |
+
+Reasoning effort defaults to `max`. The proxy auto-starts on `PRE_START` and shuts down on `POST_STOP`.
+
 ## What to commit
 
 | Content | Commit? |

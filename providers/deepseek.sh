@@ -3,10 +3,6 @@
 # DeepSeek exposes both an OpenAI-compatible (https://api.deepseek.com) and an
 # Anthropic-compatible (https://api.deepseek.com/anthropic) endpoint. We use the
 # latter so Claude Code talks to it natively -- no translation proxy required.
-#
-# Model names changed on 2026-07-24: the old `deepseek-chat` / `deepseek-reasoner`
-# are deprecated; use `deepseek-v4-flash` (fast/cheap, 1M ctx) and
-# `deepseek-v4-pro` (strong, 1M ctx) instead.
 PROVIDER_NAME="deepseek"
 PROVIDER_DESC="DeepSeek V4 (Flash/Pro) via api.deepseek.com/anthropic"
 

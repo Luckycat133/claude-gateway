@@ -20,19 +20,10 @@ EFFORT="max"
 
 # Key pool resolved from macOS Keychain at launch. Add more service names here
 # (space-separated) and the gateway auto-rotates between them on quota (429) /
-# auth (401) errors, mid-session and transparently. Only the names are committed.
-# The first entry below is the existing Token Plan key; append API / Coding Plan
-# keys as you create them.
+# auth (401) errors, mid-session and transparently.
 AUTH_MODE="keypool"
 AUTH_KEYS="codex-minimax-token-plan"
-# Optional second surface: MiniMax Coding Plan. Per your note its endpoint and
-# supported models differ from the API/Token Plan, so it is declared separately.
-# Leave commented until you have the plus-plan key(s); once set, claude-minimax
-# will try this surface automatically after the API surface's keys are exhausted.
-# PLUS_URL="https://api.minimaxi.com/anthropic"
-# PLUS_KEYS="minimax-coding-1 minimax-coding-2"
 
-# Extra environment, one KEY=VALUE per line.
 EXTRA_ENV="API_TIMEOUT_MS=3000000
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
 
