@@ -7,12 +7,15 @@ PROVIDER_NAME="openrouter"
 PROVIDER_DESC="OpenRouter (unified gateway, Anthropic-compatible)"
 
 BASE_URL="https://openrouter.ai/api"
-MODEL="deepseek/deepseek-r1-0528:free"
+MODEL="nvidia/nemotron-3-ultra-550b-a55b:free"
 CONTEXT_TOKENS="1000000"
 
-# Every Claude tier maps to MODEL (see lib/provider.sh).
+# Every Claude tier maps to MODEL (see lib/provider.sh). Nemotron 3 Ultra is a
+# reasoning model that honors OpenRouter's `reasoning_effort` (low|medium|high);
+# "high" is the maximal value valid on both the Claude Code --effort side and
+# OpenRouter's side ("max"/"xhigh" are not in OpenRouter's vocabulary).
 
-EFFORT="max"
+EFFORT="high"
 
 # Single auth surface: your OpenRouter API key, sent as Authorization: Bearer.
 # Env var first, macOS Keychain second — same order the old dual-source fields
