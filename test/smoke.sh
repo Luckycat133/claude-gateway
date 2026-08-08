@@ -346,7 +346,9 @@ else
 fi
 
 _openrouter_show=$("$GATEWAY" provider show openrouter 2>&1)
-if printf '%s\n' "$_openrouter_show" | grep -q '^default:     openrouter/free$' &&
+_openrouter_show_rc=$?
+if [ "$_openrouter_show_rc" -eq 0 ] &&
+   printf '%s\n' "$_openrouter_show" | grep -q '^default:     openrouter/free$' &&
    printf '%s\n' "$_openrouter_show" | grep -q '^context:     200000 tokens$' &&
    printf '%s\n' "$_openrouter_show" | grep -q '^effort:      high$'; then
   ok "openrouter exposes the free router with its verified context"

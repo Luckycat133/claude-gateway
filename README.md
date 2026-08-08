@@ -326,23 +326,16 @@ crouter codex gpt-5.6-sol  # 会话级换模型
 
 Endpoint `https://openrouter.ai/api` (deliberately **no** trailing `/v1` — Claude
 Code appends `/v1/messages` itself, so the provider must omit it or the request
-becomes `.../api/v1/v1/messages` and 404s). Default model
-`nvidia/nemotron-3-ultra-550b-a55b:free`, whose real context window is 1M tokens.
-Single auth surface (Bearer): the key is read from `$OPENROUTER_API_KEY` if set,
-otherwise from the Keychain item `openrouter-api-key`, so `crouter list` shows
-`command`, never `dual`.
+becomes `.../api/v1/v1/messages` and 404s).
 
-**On `:free` billing.** A `:free` model is only free *within OpenRouter's daily
-free allowance*. Once that allowance is used up, requests keep the `:free`
-suffix but bill at the underlying model's paid rate. The only hard zero-spend
-guarantee is setting the key's credit limit to `$0` at
-openrouter.ai/settings/keys — an account-side setting crouter cannot toggle.
+The default model is `openrouter/free`, OpenRouter's Free Models Router, with an
+advertised 200,000-token context window. It selects from currently available
+free models and filters them for requested capabilities. Free model availability
+and rate limits can change, so a compatible route is not always guaranteed.
 
-This configuration is verified to match OpenRouter's official Claude Code
-integration guide exactly: `ANTHROPIC_BASE_URL` is the bare `https://openrouter.ai/api`
-(no trailing `/v1`), the OpenRouter key is injected as `ANTHROPIC_AUTH_TOKEN`, and
-`ANTHROPIC_API_KEY` is explicitly empty. Ref:
-`openrouter.ai/docs/cookbook/coding-agents/claude-code-integration`.
+The provider uses a single Bearer-auth surface. It reads the key from
+`$OPENROUTER_API_KEY`, falling back to the Keychain item `openrouter-api-key`,
+so `crouter list` reports `env`, never `dual`.
 
 ```sh
 # Either export the key ...
@@ -358,7 +351,7 @@ crouter openrouter
 The provider sets `ANTHROPIC_API_KEY=` (empty) in `EXTRA_ENV`, as OpenRouter's
 Claude Code integration guide requires — a leftover Anthropic key otherwise
 conflicts with the OpenRouter token. Model IDs keep their vendor prefix, so under
-`crouter all` they read `openrouter/anthropic/claude-sonnet-4` (the gateway only
+`crouter all` the default reads `openrouter/openrouter/free` (the gateway only
 strips the first path segment).
 
 ### MiniMax Token Plan
