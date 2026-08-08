@@ -4,6 +4,11 @@ All notable changes to this local setup are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.17] - 2026-08-08
+
+Antigravity lineup refresh + key-mgmt rework + several smaller cleanups
+that were sitting in the working tree.
+
 ### Added
 - **`MODEL_ALIASES` provider contract.** Providers can declare a
   space-separated list of extra model names that are not tier-mapped (no
@@ -26,6 +31,10 @@ All notable changes to this local setup are documented in this file.
 - **`install.sh` auto-runs the proxy patcher** when the proxy checkout
   exists next to the install, so a fresh `./install.sh` configures GPT-OSS
   support end-to-end. Safe to re-run.
+- **`BYPASS_PERMISSIONS` config flag** (`config.example.sh` + `lib/launch.sh`).
+  When set to `1`, every `crouter <provider>` launch injects
+  `--dangerously-skip-permissions` unless the caller already passed it.
+  Default off; documented with a SECURITY warning in config.example.sh.
 
 ### Changed
 - **Antigravity provider model lineup updated** to match the upstream UI
@@ -33,17 +42,38 @@ All notable changes to this local setup are documented in this file.
   - `antigravity`: `gemini-2.5-flash-*` → `gemini-3.6-flash-{low,medium,high}`
   - `antigravity-claude`: `claude-sonnet-5` / `claude-opus-5-thinking` →
     `claude-sonnet-4-6` / `claude-opus-4-6-thinking`
+- **`openrouter` provider** default updated to
+  `nvidia/nemotron-3-ultra-550b-a55b:free` (1M context reasoning model);
+  `EFFORT=high` since OpenRouter's `reasoning_effort` shares only
+  `low|medium|high` with Claude Code's `--effort`.
 - **`cmd_provider_show` (bin/crouter)** now prints an `extras:` line under
   the existing aliases block when the provider declares `MODEL_ALIASES`.
-- **`README.md`** documents the `MODEL_ALIASES` opt-in and how to invoke
-  the extra models via `--model`.
+- **`README.md`** documents the `MODEL_ALIASES` opt-in, how to invoke the
+  extra models via `--model`, and the new `antigravity-proxy-patch` script.
+
+### Fixed
+- **`lib/key-mgmt.sh` rewrite** (`_require_keypool` → `_single_key_service`).
+  `crouter add` and `crouter remove` now also work for single-key providers
+  (`AUTH_MODE=keychain` / `env` with keychain fallback / dual-source
+  `API_KEY_REF`). Keypool-mode behaviour is unchanged. Mode-specific error
+  copy replaces the old generic "is not in keypool mode" message.
+- **`cmd_list_keys` accepts an optional provider arg.** `crouter list
+  <provider>` is now shorthand for `crouter list keys <provider>`; with
+  no provider it walks every known provider and prints key status,
+  including the new dual-source layout (default account via env + api key
+  via env/keychain).
+- **`crouter run` no longer honours `ANTHROPIC_MODEL` from the shell.**
+  The shell export was misleading — `launch.sh`'s `env -i` keeps it out
+  of the Claude child anyway, so honouring it only in `cmd_run` produced
+  a model the child couldn't introspect. The provider's `MODEL` field is
+  now the authoritative default; `--model` is the documented override.
 
 ### Upstream
-- A patch series for `badrisnarayanan/antigravity-claude-proxy` is being
-  submitted that adds `gpt-oss` to `getModelFamily()` and
-  `isSupportedModel()` — see `docs/upstream-pr/` for the format-patch and
-  PR description. Until that lands, the local patcher is the supported
-  way to enable GPT-OSS.
+- **PR submitted to `badrisnarayanan/antigravity-claude-proxy`**:
+  [pull/362](https://github.com/badrisnarayanan/antigravity-claude-proxy/pull/362).
+  Adds the `gpt-oss` family to `getModelFamily()` and `isSupportedModel()`
+  upstream. Until it merges, `bin/antigravity-proxy-patch` is the
+  supported local fallback.
 
 ## [0.4.16] - 2026-08-06
 
