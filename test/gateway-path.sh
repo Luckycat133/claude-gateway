@@ -5,6 +5,10 @@ set -u
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 NODE_BIN=${NODE_BIN:-$(command -v node 2>/dev/null || true)}
 [ -n "$NODE_BIN" ] || { printf 'skip  node not available\n'; exit 0; }
+command -v python3 >/dev/null 2>&1 || {
+  printf 'skip  python3 not available; cannot pick a free gateway port\n'
+  exit 0
+}
 
 TEST_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t crouter-gateway-path)
 UPSTREAM_PID=
