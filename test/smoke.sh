@@ -278,13 +278,15 @@ fi
 
 # add/remove: require a TTY, so we only check the failure path (non-keypool
 # providers must reject; the same surface logic is what we really want to
-# lock down without an interactive prompt).
-if fake_gw add antigravity 2>&1 | grep -q 'not in keypool mode'; then
+# lock down without an interactive prompt). antigravity is AUTH_MODE=static
+# (credentials live in the local proxy), so the new single-key error copy
+# is the precise mode-specific rejection we want to assert against.
+if fake_gw add antigravity 2>&1 | grep -q 'uses static auth'; then
   ok "add rejects non-keypool provider"
 else
   bad "add accepted non-keypool provider"
 fi
-if fake_gw remove antigravity --name whatever -y 2>&1 | grep -q 'not in keypool mode'; then
+if fake_gw remove antigravity --name whatever -y 2>&1 | grep -q 'has no single-key to remove'; then
   ok "remove rejects non-keypool provider"
 else
   bad "remove accepted non-keypool provider"
