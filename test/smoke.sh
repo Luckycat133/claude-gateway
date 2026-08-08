@@ -344,6 +344,15 @@ if printf '%s\n' "$_openai_show" | grep -q '^default:     gpt-5\.6-terra$' &&
 else
   bad "openai exposes an unverified model catalog or context"
 fi
+
+_openrouter_show=$("$GATEWAY" provider show openrouter 2>&1)
+if printf '%s\n' "$_openrouter_show" | grep -q '^default:     openrouter/free$' &&
+   printf '%s\n' "$_openrouter_show" | grep -q '^context:     200000 tokens$' &&
+   printf '%s\n' "$_openrouter_show" | grep -q '^effort:      high$'; then
+  ok "openrouter exposes the free router with its verified context"
+else
+  bad "openrouter exposes an unverified default model or context"
+fi
 # codex uses icebear's proxy auth -> AUTH_MODE=none, never "dual".
 if "$GATEWAY" list 2>/dev/null | awk '$1=="codex"{print $(NF-1)}' | grep -q '^none$'; then
   ok "codex reports none auth"
