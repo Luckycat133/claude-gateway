@@ -356,6 +356,36 @@ else
   bad "openrouter exposes an unverified default model or context"
 fi
 
+_antigravity_show=$("$GATEWAY" provider show antigravity 2>&1)
+_antigravity_show_rc=$?
+if [ "$_antigravity_show_rc" -eq 0 ] &&
+   printf '%s\n' "$_antigravity_show" | grep -q '^default:     gemini-3\.1-pro-low$' &&
+   printf '%s\n' "$_antigravity_show" | grep -q '^context:     1048576 tokens$' &&
+   printf '%s\n' "$_antigravity_show" | grep -q '^  opus:      gemini-3\.1-pro-low$' &&
+   printf '%s\n' "$_antigravity_show" | grep -q '^  sonnet:    gemini-3\.5-flash-low$' &&
+   printf '%s\n' "$_antigravity_show" | grep -q '^  haiku:     gemini-3\.5-flash-low$' &&
+   printf '%s\n' "$_antigravity_show" | grep -q '^  subagent:  gemini-3\.5-flash-low$' &&
+   printf '%s\n' "$_antigravity_show" | grep -q '^  extras:    gemini-3\.1-pro-high gemini-3-flash$'; then
+  ok "antigravity exposes the supported Gemini catalog and context"
+else
+  bad "antigravity exposes an unsupported Gemini catalog or context"
+fi
+
+_antigravity_claude_show=$("$GATEWAY" provider show antigravity-claude 2>&1)
+_antigravity_claude_show_rc=$?
+if [ "$_antigravity_claude_show_rc" -eq 0 ] &&
+   printf '%s\n' "$_antigravity_claude_show" | grep -q '^default:     claude-opus-4-6-thinking$' &&
+   printf '%s\n' "$_antigravity_claude_show" | grep -q '^context:     200000 tokens$' &&
+   printf '%s\n' "$_antigravity_claude_show" | grep -q '^  opus:      claude-opus-4-6-thinking$' &&
+   printf '%s\n' "$_antigravity_claude_show" | grep -q '^  sonnet:    claude-sonnet-4-6$' &&
+   printf '%s\n' "$_antigravity_claude_show" | grep -q '^  haiku:     claude-sonnet-4-6$' &&
+   printf '%s\n' "$_antigravity_claude_show" | grep -q '^  subagent:  claude-sonnet-4-6$' &&
+   printf '%s\n' "$_antigravity_claude_show" | grep -q '^  extras:    gpt-oss-120b-medium$'; then
+  ok "antigravity-claude exposes the supported Claude catalog and context"
+else
+  bad "antigravity-claude exposes an unsupported Claude catalog or context"
+fi
+
 # Pin Codex's configured model tiers and context at the public provider view.
 _codex_show=$("$GATEWAY" provider show codex 2>&1)
 _codex_show_rc=$?

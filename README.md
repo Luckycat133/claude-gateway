@@ -67,8 +67,7 @@ Extra arguments after the provider name are passed straight to Claude Code. Per-
 ```sh
 crouter ollama qwen3.5:2b                        # positional model (short form)
 crouter ollama qwen3.5:2b -p "hi"                # positional model + flags
-crouter antigravity --model gemini-3.6-flash-high # explicit --model also works
-ANTHROPIC_MODEL=gemini-3.6-flash-high crouter antigravity
+crouter antigravity --model gemini-3.1-pro-high # explicit model override
 ```
 
 ### Unified gateway: `crouter all`
@@ -443,13 +442,13 @@ Gemini mapping (1M context):
 
 | Claude Code selection | Antigravity model |
 | --- | --- |
-| Default | `gemini-3.6-flash-medium` |
-| `/model opus` | `gemini-3.6-flash-high` |
-| `/model sonnet` | `gemini-3.6-flash-medium` |
-| `/model haiku` | `gemini-3.6-flash-low` |
-| subagents | `gemini-3.6-flash-medium` |
+| Default | `gemini-3.1-pro-low` |
+| `/model opus` | `gemini-3.1-pro-low` |
+| `/model sonnet` | `gemini-3.5-flash-low` |
+| `/model haiku` | `gemini-3.5-flash-low` |
+| subagents | `gemini-3.5-flash-low` |
 
-Additional Antigravity Gemini models (not tier-mapped; select explicitly via `crouter antigravity --model <name>`): `gemini-3.5-flash-medium`, `gemini-3.1-pro-low`. See `crouter provider show antigravity` for the live list.
+Additional Antigravity Gemini models (select explicitly via `crouter antigravity --model <name>`): `gemini-3.1-pro-high`, `gemini-3-flash`. See `crouter provider show antigravity` for the configured list.
 
 Claude mapping (200K context): default and `/model opus` → `claude-opus-4-6-thinking`; `/model sonnet`, `/model haiku`, and subagents → `claude-sonnet-4-6`.
 

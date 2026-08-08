@@ -6,7 +6,7 @@ PROVIDER_NAME="antigravity-claude"
 PROVIDER_DESC="Claude models via the local Antigravity proxy"
 
 BASE_URL=$(antigravity_base_url)
-MODEL="claude-sonnet-4-6"
+MODEL="claude-opus-4-6-thinking"
 CONTEXT_TOKENS="200000"
 
 MODEL_OPUS="claude-opus-4-6-thinking"
@@ -14,10 +14,7 @@ MODEL_SONNET="claude-sonnet-4-6"
 MODEL_HAIKU="claude-sonnet-4-6"
 MODEL_SUBAGENT="claude-sonnet-4-6"
 
-# Extra Antigravity models served alongside the Claude tier. Select explicitly
-# with `crouter antigravity-claude --model <name>`. The Antigravity proxy must
-# also recognize the family (its `getModelFamily()` only knows "claude"/"gemini"
-# by default) — for GPT-OSS that requires a local proxy patch.
+# GPT-OSS requires the bundled local proxy patch.
 MODEL_ALIASES="gpt-oss-120b-medium"
 
 EFFORT="medium"
