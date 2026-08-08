@@ -38,6 +38,7 @@ jobs:
         run: |
           for shell in sh dash; do
             for test_file in test/*.sh; do
+              printf 'running %s %s\n' "$shell" "$test_file"
               "$shell" "$test_file"
             done
           done

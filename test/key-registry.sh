@@ -109,7 +109,11 @@ fi
 printf 'plan-two\n' | run_crouter add demo --surface plan --stdin >/dev/null
 [ "$(cat "$KEYCHAIN_DIR/demo-plan-2")" = plan-two ]
 grep -qx 'plan[[:space:]]demo-plan-2' "$STATE_DIR/keypools/demo.tsv"
-_registry_mode=$(stat -f '%Lp' "$STATE_DIR/keypools/demo.tsv" 2>/dev/null || stat -c '%a' "$STATE_DIR/keypools/demo.tsv")
+if _registry_mode=$(stat -f '%Lp' "$STATE_DIR/keypools/demo.tsv" 2>/dev/null); then
+  :
+else
+  _registry_mode=$(stat -c '%a' "$STATE_DIR/keypools/demo.tsv")
+fi
 [ "$_registry_mode" = 600 ]
 [ "$before" = "$(cksum "$FAKE_ROOT/providers/demo.sh")" ]
 
