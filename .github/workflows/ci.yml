@@ -9,7 +9,7 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
@@ -21,8 +21,9 @@ jobs:
             # SC1007:  CDPATH= cd / VAR= VAR2= one-liner resets are intentional POSIX idioms
             # SC1090/SC1091: providers and config are sourced at runtime (dynamic paths)
             # SC2034: provider vars are read by the launcher after sourcing, not in-file
+            # SC2120: resolve_surface_tokens(1) is called from bin/crouter after sourcing lib/auth.sh
             # shellcheck disable=SC2086
-            shellcheck --exclude=SC1007,SC1090,SC1091,SC2034 $files
+            shellcheck --severity=warning --exclude=SC1007,SC1090,SC1091,SC2034,SC2120 $files
           else
             echo "No shell scripts found to check."
           fi

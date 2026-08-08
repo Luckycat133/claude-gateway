@@ -116,6 +116,7 @@ cmd_run() {
   _seen_flag=0
   _n=$#
   _i=0
+  _a=""
   while [ $_i -lt $_n ]; do
     _i=$((_i + 1))
     eval "_a=\${$_i}"

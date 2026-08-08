@@ -40,8 +40,12 @@ _crouter_complete() {
         COMPREPLY=( $(compgen -W "$providers" -- "$cur") ) ;;
     esac
     if [ "${COMP_WORDS[1]}" = all ]; then
+      # Arrays from compgen keep Bash 3 compatibility on macOS.
+      # shellcheck disable=SC2207
       COMPREPLY=( $(compgen -W "--check" -- "$cur") )
     elif [ "${COMP_WORDS[1]}" = add ]; then
+      # Arrays from compgen keep Bash 3 compatibility on macOS.
+      # shellcheck disable=SC2207
       COMPREPLY+=( $(compgen -W "--surface plan api --name --stdin" -- "$cur") )
     fi
   fi
