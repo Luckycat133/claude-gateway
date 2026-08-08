@@ -457,6 +457,8 @@ Gemini mapping (1M context):
 | `/model haiku` | `gemini-3.6-flash-low` |
 | subagents | `gemini-3.6-flash-medium` |
 
+Additional Antigravity Gemini models (not tier-mapped; select explicitly via `crouter antigravity --model <name>`): `gemini-3.5-flash-medium`, `gemini-3.1-pro-low`. See `crouter provider show antigravity` for the live list.
+
 Claude mapping (200K context): default and `/model opus` → `claude-opus-4-6-thinking`; `/model sonnet`, `/model haiku`, and subagents → `claude-sonnet-4-6`.
 
 Do not switch between Gemini and Claude models inside one session — their thinking signatures are incompatible. Start a new session with the matching provider instead.

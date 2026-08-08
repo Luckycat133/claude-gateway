@@ -280,6 +280,9 @@ cmd_provider_show() {
   printf '  sonnet:    %s\n'    "$MODEL_SONNET"
   printf '  haiku:     %s\n'    "$MODEL_HAIKU"
   printf '  subagent:  %s\n'    "$MODEL_SUBAGENT"
+  if [ -n "${MODEL_ALIASES:-}" ]; then
+    printf '  extras:    %s\n' "$MODEL_ALIASES"
+  fi
   printf '\n'
   if is_dual_source; then
     if [ -n "${DEFAULT_TOKEN_ENV:-}" ]; then

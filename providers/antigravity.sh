@@ -6,16 +6,21 @@ PROVIDER_NAME="antigravity"
 PROVIDER_DESC="Gemini models via the local Antigravity proxy"
 
 BASE_URL=$(antigravity_base_url)
-MODEL="gemini-2.5-flash-medium"
+MODEL="gemini-3.6-flash-medium"
 CONTEXT_TOKENS="1048576"
 
-# Gemini 2.5 Flash only; low/medium/high map to the haiku/sonnet/opus tiers.
-MODEL_OPUS="gemini-2.5-flash-high"
-MODEL_SONNET="gemini-2.5-flash-medium"
-MODEL_HAIKU="gemini-2.5-flash-low"
-MODEL_SUBAGENT="gemini-2.5-flash-medium"
+# Gemini 3.6 Flash only; low/medium/high map to the haiku/sonnet/opus tiers.
+MODEL_OPUS="gemini-3.6-flash-high"
+MODEL_SONNET="gemini-3.6-flash-medium"
+MODEL_HAIKU="gemini-3.6-flash-low"
+MODEL_SUBAGENT="gemini-3.6-flash-medium"
 
-# Gemini effort is encoded in the model name (gemini-2.5-flash-{low,medium,high}),
+# Extra Antigravity Gemini models that aren't tier-mapped. Select explicitly
+# with `crouter antigravity --model <name>` — Claude Code's --model flag picks
+# them up directly. Discovered by `crouter provider show antigravity`.
+MODEL_ALIASES="gemini-3.5-flash-medium gemini-3.1-pro-low"
+
+# Gemini effort is encoded in the model name (gemini-3.6-flash-{low,medium,high}),
 # so we leave Claude Code's --effort unset here to avoid double control.
 EFFORT=""
 
