@@ -13,7 +13,7 @@ crouter/
 ├── providers/
 │   ├── anthropic.sh               # Anthropic Claude (subscription OAuth -> API key)
 │   ├── openai.sh                  # OpenAI GPT via the Anthropic-compatible Messages API
-│   ├── codex.sh                   # ChatGPT/Codex 订阅 via icebear0828/codex-proxy
+│   ├── codex.sh                   # ChatGPT/Codex subscription via icebear0828/codex-proxy
 │   ├── openrouter.sh              # OpenRouter unified gateway
 │   ├── minimax.sh                 # MiniMax M3 (China endpoint)
 │   ├── deepseek.sh                # DeepSeek V4 (Flash/Pro) via /anthropic endpoint
@@ -306,21 +306,23 @@ compat endpoint maps Claude Code's thinking budget to its own reasoning effort.
 Verify your key actually has access to the Messages API before relying on it —
 `/v1/messages` is newer than the classic `/v1/chat/completions` surface.
 
-### Codex（ChatGPT/Codex 订阅额度）
+### Codex (ChatGPT/Codex subscription)
 
-后端是 icebear0828/codex-proxy（:8080，自带 Anthropic↔Codex 翻译，OAuth PKCE
-登录 ChatGPT 账号）。安装并完成一次登录后：
+This provider uses icebear0828/codex-proxy on port 19000. The proxy translates
+the Anthropic Messages API to Codex and authenticates the ChatGPT account with
+OAuth PKCE. Install it and complete the initial login first:
 
 ```sh
-crouter codex              # 默认 gpt-5.6-terra
-crouter codex gpt-5.6-sol  # 会话级换模型
+crouter codex                # default: gpt-5.6-sol
+crouter codex gpt-5.6-terra  # override the model for this session
 ```
 
-模型**不钉死**：目录是运行时从 Codex 后端拉取的（`GET /v1/models/catalog`，随
-账号套餐变化），provider 只给默认值，四档别名不设（回落默认）；切换用
-`crouter codex <model>`、会话内 `/model` 或 `ANTHROPIC_DEFAULT_*_MODEL`
-环境变量。注意 `crouter all` 模式下 PRE_START 不执行，需 icebear 常驻
-（launchd / .dmg）。
+The available catalog is fetched dynamically from `GET /v1/models/catalog` and
+depends on the account and plan. The configured tiers are Opus = `gpt-5.6-sol`,
+Sonnet = `gpt-5.6-terra`, and Haiku/Subagent = `gpt-5.6-luna`, all with a
+1,050,000-token context window. Select another catalog model with
+`crouter codex <model>`, `/model`, or an `ANTHROPIC_DEFAULT_*_MODEL` variable.
+In `crouter all` mode, keep the proxy running because `PRE_START` is not run.
 
 ### OpenRouter
 
