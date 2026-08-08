@@ -94,9 +94,13 @@ cmd_run() {
   load_provider "$_p"
 
   # Resolve the primary model with this precedence:
-  #   --model <x>  >  first bare positional (short form)  >  ANTHROPIC_MODEL  >  provider MODEL
+  #   --model <x>  >  first bare positional (short form)  >  provider MODEL
   # A bare positional model is only taken if it appears BEFORE any flag, so it
   # never collides with a flag's own value (e.g. `crouter ollama -p "prompt"`).
+  # An ANTHROPIC_MODEL exported in the shell (e.g. from ~/.zshrc as a leftover
+  # MiniMax default) is a leftover we deliberately ignore here: launch.sh's
+  # `env -i` keeps it out of the Claude child, and the chosen provider's MODEL
+  # is authoritative. Pass --model to override explicitly.
   _main_model=""
   _model_set=0
   _pos_model=""
@@ -141,8 +145,6 @@ cmd_run() {
     : # explicit --model wins
   elif [ -n "$_pos_model" ]; then
     _main_model=$_pos_model
-  elif [ -n "${ANTHROPIC_MODEL:-}" ]; then
-    _main_model=$ANTHROPIC_MODEL
   else
     _main_model=$MODEL
   fi
