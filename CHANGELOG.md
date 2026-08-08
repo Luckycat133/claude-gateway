@@ -2,6 +2,49 @@
 
 All notable changes to this local setup are documented in this file.
 
+## [Unreleased]
+
+### Added
+- **`MODEL_ALIASES` provider contract.** Providers can declare a
+  space-separated list of extra model names that are not tier-mapped (no
+  opus/sonnet/haiku/subagent slot), but should still surface in
+  `crouter provider show <provider>` under an `extras:` line. Selected
+  explicitly via `crouter <provider> --model <name>`. Providers that don't
+  set `MODEL_ALIASES` are unaffected. Currently used by:
+  - `antigravity`: `gemini-3.5-flash-medium gemini-3.1-pro-low`
+  - `antigravity-claude`: `gpt-oss-120b-medium`
+- **`bin/antigravity-proxy-patch`.** Idempotent sed-based patcher for the
+  local `antigravity-claude-proxy` checkout. Adds the `gpt-oss` family
+  branch to `getModelFamily()` and extends `isSupportedModel()` so the
+  proxy stops rejecting names like `gpt-oss-120b-medium` with
+  `Invalid model`. Without this patch the proxy's request validation
+  (`server.js`) refuses any non-Claude/Gemini model name even when the
+  upstream Cloud Code API serves it.
+  Modes: default = apply (no-op if already applied); `--status` reports;
+  `--revert` undoes the patch; `--proxy-dir <path>` overrides the
+  auto-detected `$ROOT_DIR/antigravity-claude-proxy`.
+- **`install.sh` auto-runs the proxy patcher** when the proxy checkout
+  exists next to the install, so a fresh `./install.sh` configures GPT-OSS
+  support end-to-end. Safe to re-run.
+
+### Changed
+- **Antigravity provider model lineup updated** to match the upstream UI
+  (2026-08-08):
+  - `antigravity`: `gemini-2.5-flash-*` → `gemini-3.6-flash-{low,medium,high}`
+  - `antigravity-claude`: `claude-sonnet-5` / `claude-opus-5-thinking` →
+    `claude-sonnet-4-6` / `claude-opus-4-6-thinking`
+- **`cmd_provider_show` (bin/crouter)** now prints an `extras:` line under
+  the existing aliases block when the provider declares `MODEL_ALIASES`.
+- **`README.md`** documents the `MODEL_ALIASES` opt-in and how to invoke
+  the extra models via `--model`.
+
+### Upstream
+- A patch series for `badrisnarayanan/antigravity-claude-proxy` is being
+  submitted that adds `gpt-oss` to `getModelFamily()` and
+  `isSupportedModel()` — see `docs/upstream-pr/` for the format-patch and
+  PR description. Until that lands, the local patcher is the supported
+  way to enable GPT-OSS.
+
 ## [0.4.16] - 2026-08-06
 
 Housekeeping release: no intended change to how any provider launches. The

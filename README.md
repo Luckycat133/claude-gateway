@@ -461,6 +461,22 @@ Additional Antigravity Gemini models (not tier-mapped; select explicitly via `cr
 
 Claude mapping (200K context): default and `/model opus` → `claude-opus-4-6-thinking`; `/model sonnet`, `/model haiku`, and subagents → `claude-sonnet-4-6`.
 
+Additional Antigravity models registered under `MODEL_ALIASES` (select explicitly via `--model`): `gpt-oss-120b-medium` on `antigravity-claude`. See `crouter provider show <provider>` for the live list.
+
+#### GPT-OSS support (requires a one-line proxy patch)
+
+The proxy's `getModelFamily()` only recognises the `claude` and `gemini` substrings; any other name — including `gpt-oss-120b-medium` — is rejected by `isValidModel()` with `invalid_request_error: Invalid model: gpt-oss-120b-medium`. Until the patch lands upstream, `crouter` ships a local patcher that applies the same change idempotently:
+
+```sh
+# Auto-detects $ROOT_DIR/antigravity-claude-proxy; honors $ANTIGRAVITY_PROXY_DIR.
+crouter antigravity-proxy-patch              # apply (no-op if already applied)
+crouter antigravity-proxy-patch --status     # report current state
+crouter antigravity-proxy-patch --revert     # remove the patch
+crouter antigravity-proxy-patch --proxy-dir <path>   # if the proxy lives elsewhere
+```
+
+`./install.sh` runs the patcher automatically when it finds the proxy checkout next to itself, so a fresh `git clone antigravity-claude-proxy && ./install.sh` configures GPT-OSS end-to-end. See `docs/upstream-pr/PR.md` for the format-patch and PR body to send upstream.
+
 Do not switch between Gemini and Claude models inside one session — their thinking signatures are incompatible. Start a new session with the matching provider instead.
 
 The Antigravity proxy is an unofficial integration. Do not use it with a primary Google account, sensitive source code, or production credentials.
