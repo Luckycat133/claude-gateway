@@ -481,7 +481,12 @@ build_all_routes() {
       else
         case "${AUTH_MODE:-}" in
           keychain) [ -n "${AUTH_REFERENCE:-}" ] && _api_key=$(kc_get "$AUTH_REFERENCE") ;;
-          env)      [ -n "${AUTH_REFERENCE:-}" ] && _api_key=$(printenv "$AUTH_REFERENCE" 2>/dev/null) ;;
+          env)
+            [ -n "${AUTH_REFERENCE:-}" ] && _api_key=$(printenv "$AUTH_REFERENCE" 2>/dev/null)
+            if [ -z "$_api_key" ] && [ -n "${AUTH_KEYCHAIN_FALLBACK:-}" ]; then
+              _api_key=$(kc_get "$AUTH_KEYCHAIN_FALLBACK")
+            fi
+            ;;
           command)  [ -n "${AUTH_REFERENCE:-}" ] && _api_key=$(eval "$AUTH_REFERENCE" 2>/dev/null) ;;
           static)   _api_key="${AUTH_REFERENCE:-}" ;;
         esac
@@ -507,7 +512,7 @@ build_all_routes() {
       fi
       # Candidate models: default first, then the tier aliases, then whatever is
       # pulled locally for ollama. route-build.js dedups and keeps this order.
-      _models="${MODEL:-} ${MODEL_OPUS:-} ${MODEL_SONNET:-} ${MODEL_HAIKU:-} ${MODEL_SUBAGENT:-}"
+      _models="${MODEL:-} ${MODEL_OPUS:-} ${MODEL_SONNET:-} ${MODEL_HAIKU:-} ${MODEL_SUBAGENT:-} ${MODEL_ALIASES:-}"
       if [ "$PROVIDER_NAME" = "ollama" ] && command -v ollama >/dev/null 2>&1; then
         _models="$_models $(ollama list 2>/dev/null | awk 'NR>1{print $1}')"
       fi

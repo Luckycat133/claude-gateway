@@ -1,11 +1,11 @@
 #!/bin/sh
 # Provider: OpenAI — GPT via official Anthropic-compatible Messages API.
-# Endpoint: https://api.openai.com/v1/messages — OpenAI's native compat layer.
+# Endpoint prefix: https://api.openai.com — Claude Code appends /v1/messages.
 # Auth: OpenAI API key sent as Authorization: Bearer <key>.
 PROVIDER_NAME="openai"
 PROVIDER_DESC="OpenAI GPT via official Anthropic-compatible Messages API"
 
-BASE_URL="https://api.openai.com/v1/messages"
+BASE_URL="https://api.openai.com"
 MODEL="gpt-5.6-terra"
 CONTEXT_TOKENS="1050000"
 

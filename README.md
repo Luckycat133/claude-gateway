@@ -147,9 +147,13 @@ HEALTH_CHECK_URL=""                         # used by status/doctor
 
 `CONTEXT_TOKENS` → injected as `CLAUDE_CODE_MAX_CONTEXT_TOKENS`; should match upstream `context_length`. Omitted = not injected (Claude Code default).
 
-`anthropic` and `openrouter` do not use `AUTH_MODE`. They declare up to
-two *credential surfaces* and crouter always spends the **default account's
-included quota first**, falling back to the metered API key on **401/429**:
+`anthropic` declares two credential surfaces: crouter spends the **default
+account's included quota first**, falling back to the metered API key on
+**401/429**. `openrouter` instead uses `AUTH_MODE="env"`: it reads
+`OPENROUTER_API_KEY` first and then the `openrouter-api-key` Keychain item.
+`openai` uses `AUTH_MODE="keychain"` with the `openai-api-key` item.
+
+The Anthropic dual-source contract is:
 
 ```sh
 # --- preferred "default account" (tried FIRST) ---
@@ -251,7 +255,7 @@ other `AUTH_MODE`. The provider must be in `AUTH_MODE="keypool"` for
 
 ### Anthropic Claude
 
-Endpoint `https://api.anthropic.com`, default `claude-sonnet-4`, 200k context.
+Endpoint `https://api.anthropic.com`, default `claude-sonnet-5`, 200k context.
 This is a [dual-source provider](#dual-source-providers-default-account-first-api-key-as-fallback):
 your **Claude subscription (Pro/Max) OAuth token is spent first**, and the
 metered Console API key only takes over on 401/429.
@@ -272,19 +276,19 @@ crouter anthropic
 
 | Claude Code selection | Model |
 | --- | --- |
-| Default, `/model sonnet`, subagents | `claude-sonnet-4` |
-| `/model opus` | `claude-opus-4-5` |
-| `/model haiku` | `claude-haiku-4` |
+| Default, `/model sonnet`, subagents | `claude-sonnet-5` |
+| `/model opus` | `claude-opus-5` |
+| `/model haiku` | `claude-haiku-4-5` |
 
 Configure only one of the two and crouter connects directly to it — the failover
 proxy is only started when both are present.
 
 ### OpenAI GPT
 
-Endpoint `https://api.openai.com/v1/messages` — OpenAI's own Anthropic-compatible
-Messages API, so Claude Code talks to GPT natively (Bearer API key; it does NOT
-use Anthropic's `x-api-key` header). Single credential surface; auth is one API
-key in Keychain.
+Endpoint prefix `https://api.openai.com` — Claude Code appends `/v1/messages`
+when it calls OpenAI's Anthropic-compatible Messages API. Claude Code therefore
+talks to GPT natively (Bearer API key; it does NOT use Anthropic's `x-api-key`
+header). Single credential surface; auth is one API key in Keychain.
 
 ```sh
 read -s "OPENAI_KEY?Paste OpenAI API key: "; echo
@@ -294,13 +298,10 @@ unset OPENAI_KEY
 crouter openai
 ```
 
-Models (official catalog, 2026-07-09+): `gpt-5.6-sol` (frontier tier),
-`gpt-5.6-terra` (balanced, default), `gpt-5.6-luna` (efficient tier) — all
-1.05M ctx / 128K max output. Reasoning effort defaults to `high`; OpenAI's
-compat endpoint maps Claude Code's thinking budget to its own reasoning effort.
-
-Verify your key actually has access to the Messages API before relying on it —
-`/v1/messages` is newer than the classic `/v1/chat/completions` surface.
+Configured models are `gpt-5.6-sol` (frontier tier), `gpt-5.6-terra`
+(balanced, default), and `gpt-5.6-luna` (efficient tier), all with a 1.05M-token
+context window. Reasoning effort defaults to `high`; OpenAI's compatibility
+endpoint maps Claude Code's thinking budget to its own reasoning effort.
 
 ### Codex (ChatGPT/Codex subscription)
 
@@ -413,8 +414,6 @@ Model mapping (1M context):
 | Default | `deepseek-v4-flash` |
 | `/model opus` | `deepseek-v4-pro` |
 | `/model sonnet`, `/model haiku`, subagents | `deepseek-v4-flash` |
-
-Note: the former `deepseek-chat` / `deepseek-reasoner` names were deprecated on 2026-07-24; use `deepseek-v4-flash` / `deepseek-v4-pro`. Prefer the Keychain setup above. To instead read the key from an environment variable, change the provider to `AUTH_MODE="env"` and `AUTH_REFERENCE="DEEPSEEK_API_KEY"`, then `export DEEPSEEK_API_KEY=...`.
 
 ### Antigravity (Gemini / Claude)
 

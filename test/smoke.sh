@@ -334,15 +334,16 @@ fi
 # The public provider view exposes the production model catalog and context
 # passed to Claude Code, so pin the verified API contract at that boundary.
 _openai_show=$("$GATEWAY" provider show openai 2>&1)
-if printf '%s\n' "$_openai_show" | grep -q '^default:     gpt-5\.6-terra$' &&
+if printf '%s\n' "$_openai_show" | grep -q '^endpoint:    https://api\.openai\.com$' &&
+   printf '%s\n' "$_openai_show" | grep -q '^default:     gpt-5\.6-terra$' &&
    printf '%s\n' "$_openai_show" | grep -q '^context:     1050000 tokens$' &&
    printf '%s\n' "$_openai_show" | grep -q '^  opus:      gpt-5\.6-sol$' &&
    printf '%s\n' "$_openai_show" | grep -q '^  sonnet:    gpt-5\.6-terra$' &&
    printf '%s\n' "$_openai_show" | grep -q '^  haiku:     gpt-5\.6-luna$' &&
    printf '%s\n' "$_openai_show" | grep -q '^  subagent:  gpt-5\.6-luna$'; then
-  ok "openai exposes the production model catalog and context"
+  ok "openai exposes the endpoint prefix, production model catalog, and context"
 else
-  bad "openai exposes an unverified model catalog or context"
+  bad "openai exposes an incorrect endpoint, model catalog, or context"
 fi
 
 _openrouter_show=$("$GATEWAY" provider show openrouter 2>&1)
