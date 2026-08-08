@@ -26,7 +26,7 @@ load_provider() {
   CONTEXT_TOKENS= AUTH_MODE=none AUTH_REFERENCE= AUTH_KEYCHAIN_FALLBACK= _AUTH_SCHEME=
   EXTRA_ENV= PRE_START= POST_STOP= HEALTH_CHECK_URL= EFFORT=
   AUTH_KEYS= PLUS_URL= PLUS_KEYS=
-  # Dual-source contract (anthropic/openai/openrouter).
+  # Optional dual-source contract (currently used by anthropic).
   DEFAULT_URL= DEFAULT_AUTH_TYPE= DEFAULT_TOKEN_ENV= DEFAULT_TOKEN_ENV_FALLBACK=
   API_URL= API_AUTH_TYPE= API_KEY_ENV= API_KEY_REF=
 
