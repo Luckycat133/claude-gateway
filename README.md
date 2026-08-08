@@ -321,8 +321,8 @@ The available catalog is fetched dynamically from `GET /v1/models/catalog` and
 depends on the account and plan. The configured tiers are Opus = `gpt-5.6-sol`,
 Sonnet = `gpt-5.6-terra`, and Haiku/Subagent = `gpt-5.6-luna`, all with a
 1,050,000-token context window. Select another catalog model with
-`crouter codex <model>`, `/model`, or an `ANTHROPIC_DEFAULT_*_MODEL` variable.
-In `crouter all` mode, keep the proxy running because `PRE_START` is not run.
+`crouter codex <model>` or the in-session `/model` command. In `crouter all`
+mode, keep the proxy running because `PRE_START` is not run.
 
 ### OpenRouter
 

@@ -356,16 +356,19 @@ else
   bad "openrouter exposes an unverified default model or context"
 fi
 
+# Pin Codex's configured model tiers and context at the public provider view.
 _codex_show=$("$GATEWAY" provider show codex 2>&1)
-if printf '%s\n' "$_codex_show" | grep -q '^default:     gpt-5\.6-sol$' &&
+_codex_show_rc=$?
+if [ "$_codex_show_rc" -eq 0 ] &&
+   printf '%s\n' "$_codex_show" | grep -q '^default:     gpt-5\.6-sol$' &&
    printf '%s\n' "$_codex_show" | grep -q '^context:     1050000 tokens$' &&
    printf '%s\n' "$_codex_show" | grep -q '^  opus:      gpt-5\.6-sol$' &&
    printf '%s\n' "$_codex_show" | grep -q '^  sonnet:    gpt-5\.6-terra$' &&
    printf '%s\n' "$_codex_show" | grep -q '^  haiku:     gpt-5\.6-luna$' &&
    printf '%s\n' "$_codex_show" | grep -q '^  subagent:  gpt-5\.6-luna$'; then
-  ok "codex exposes the proxy model catalog and context"
+  ok "codex exposes the configured model tiers and context"
 else
-  bad "codex exposes an outdated model catalog or context"
+  bad "codex exposes incorrect configured model tiers or context"
 fi
 # codex uses icebear's proxy auth -> AUTH_MODE=none, never "dual".
 if "$GATEWAY" list 2>/dev/null | awk '$1=="codex"{print $(NF-1)}' | grep -q '^none$'; then
