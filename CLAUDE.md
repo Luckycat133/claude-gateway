@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-- **Run Smoke Tests**: `./test/smoke.sh`
+- **Run All Tests**: `for test_file in test/*.sh; do sh "$test_file"; done` and
+  repeat with `dash` before release.
+- **Check Syntax**: `sh -n bin/crouter bin/crouter-compat install.sh lib/*.sh providers/*.sh test/*.sh`
+- **Check Release**: `./bin/crouter --version`, `git diff --check`, and confirm
+  `VERSION`, `README.md`, and the newest `CHANGELOG.md` release agree.
 - **Install Local Binary & Compatibility Launchers**: `./install.sh`
 - **Lint Shell Scripts**: `shellcheck bin/crouter bin/crouter-compat install.sh test/smoke.sh providers/*.sh lib/*.sh`
 - **Run Framework Entry Point**: `./bin/crouter list` (or `claude`, `doctor`, `add <provider>`, `remove <provider> --name <service>`, `list keys <provider>`, `all --check`, `all`)
@@ -48,3 +52,11 @@ Subcommands are flat: `crouter <verb> [args]`. Verbs: `claude` (native account/l
 - `lib/`: Shared shell modules (`provider.sh`, `auth.sh`, `key-mgmt.sh`, `assets.sh`, `launch.sh`), `antigravity-common.sh`, shared Node proxy primitives (`proxy-common.js`), and dependency-free JSON builders/renderers (`route-build.js`, `provider-assets.js`).
 - `install.sh`: Creates executable symlinks in `$INSTALL_DIR` (`~/.local/bin`) and copies `config.example.sh` to `config.sh`.
 - `test/`: Hermetic offline contract, proxy, lifecycle, provider-matrix, native-backend, and asset-isolation tests. Run all `test/*.sh`, not only the legacy smoke entry point.
+
+## Release documentation
+
+`VERSION` is the only runtime version source. Keep an empty `Unreleased`
+heading in `CHANGELOG.md`, publish releases in reverse chronological order,
+and update the README version badge in the same commit. Provider facts must
+remain tied to primary sources in `docs/provider-audit.md`; never advance its
+audit date without rechecking those sources.

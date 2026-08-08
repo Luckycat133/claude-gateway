@@ -1,11 +1,17 @@
 # Provider audit
 
-Audit date: 2026-08-08.
+Primary-source audit date: 2026-08-08. Release documentation checked:
+2026-08-09 for crouter 0.5.1.
 
 This document records the primary sources used for crouter's provider
 contracts. It is a configuration audit, not a promise that an account owns a
 particular plan or model. Vendor catalogs can vary by region, plan tier, and
 account entitlements.
+
+The release contains 29 provider contracts, including 21 mainland-China
+provider entries. Counts include separate products when their credentials or
+endpoints cannot safely share a route, such as DashScope/Coding Plan,
+Qianfan personal/team/legacy Coding Plan, and Tencent personal/Coding Plan.
 
 ## Acceptance rules
 

@@ -1,5 +1,8 @@
 # crouter
 
+[![CI](https://github.com/Luckycat133/crouter/actions/workflows/ci.yml/badge.svg)](https://github.com/Luckycat133/crouter/actions/workflows/ci.yml)
+![Version](https://img.shields.io/badge/version-0.5.1-blue)
+
 `crouter` launches Claude Code against audited Anthropic-compatible providers
 without copying provider credentials into this repository. It keeps Token Plan
 keys, pay-as-you-go API keys, endpoints, auth headers, and model mappings as
@@ -10,6 +13,26 @@ the next request does not immediately spend another retry on it.
 The current provider values were checked against vendor documentation on
 2026-08-08. See [docs/provider-audit.md](docs/provider-audit.md) for the source
 matrix and decisions.
+
+Release 0.5.1 is implementation-complete against the repository's offline
+contract suite under POSIX `sh` and `dash`. Live catalog access, remaining
+quota, and account entitlement still require the account owner's credentials
+and may incur provider charges.
+
+## Table of contents
+
+- [Install](#install)
+- [Usage](#usage)
+- [Provider catalog](#provider-catalog)
+- [Token Plan and API key isolation](#token-plan-and-api-key-isolation)
+- [Provider MCPs and skills](#provider-mcps-and-skills)
+- [Unified gateway](#unified-gateway)
+- [Native Bedrock and Vertex](#native-bedrock-and-vertex)
+- [Antigravity and local providers](#antigravity-and-local-providers)
+- [Adding a provider](#adding-a-provider)
+- [Security](#security)
+- [Development](#development)
+- [Maintenance and license](#maintenance-and-license)
 
 ## Install
 
@@ -396,3 +419,10 @@ git diff --check
 
 Version is read from `VERSION`. Bash and zsh completions are under
 `completions/`.
+
+## Maintenance and license
+
+The project is maintained in
+[`Luckycat133/crouter`](https://github.com/Luckycat133/crouter). This repository
+does not currently include a license file; publish one before relying on
+explicit redistribution or modification rights.

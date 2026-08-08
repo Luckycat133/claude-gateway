@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  shellcheck-and-smoke:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,7 +16,7 @@ jobs:
 
       - name: Run shellcheck
         run: |
-          files=$(git ls-files | grep -E '\.sh$|\.bash$|^bin/claude-gateway$' | grep -v '^antigravity-claude-proxy/')
+          files=$(git ls-files | grep -E '\.sh$|\.bash$|^bin/(crouter|crouter-compat)$')
           if [ -n "$files" ]; then
             # SC1007:  CDPATH= cd / VAR= VAR2= one-liner resets are intentional POSIX idioms
             # SC1090/SC1091: providers and config are sourced at runtime (dynamic paths)
@@ -27,5 +27,23 @@ jobs:
             echo "No shell scripts found to check."
           fi
 
-      - name: Run smoke test
-        run: sh test/smoke.sh
+      - name: Check Node syntax
+        run: |
+          for file in bin/gateway bin/keypool-proxy lib/*.js; do
+            node --check "$file"
+          done
+
+      - name: Run all offline tests with sh and dash
+        run: |
+          for shell in sh dash; do
+            for test_file in test/*.sh; do
+              "$shell" "$test_file"
+            done
+          done
+
+      - name: Verify release metadata
+        run: |
+          version=$(cat VERSION)
+          test "$(./bin/crouter --version)" = "crouter $version"
+          grep -F "version-$version-blue" README.md
+          grep -F "## [$version]" CHANGELOG.md

@@ -4,6 +4,8 @@ All notable changes to this local setup are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-09
+
 ### Added
 
 - `crouter claude` preserves Claude Code's native `/login`, stored account, and
@@ -21,6 +23,11 @@ All notable changes to this local setup are documented in this file.
 
 ### Changed
 
+- CI now checks the extensionless shell entry points, all Node entry points,
+  release metadata, and every offline test under both `sh` and `dash`.
+- The Codex provider documentation now matches its port-19000 health gate and
+  current Sol/Terra/Luna tier mapping instead of retaining the obsolete port
+  8080 implementation plan.
 - Direct and unified proxies cool down candidates after 401/402/403/429 or
   connection failure, honor longer `Retry-After` values, and share one auth,
   header-sanitization, retry, and health implementation.
@@ -35,6 +42,19 @@ All notable changes to this local setup are documented in this file.
 - Provider-managed MCPs/plugins remain session-scoped and strict by default;
   `crouter all` uses a strict empty profile to block stale provider tools, and
   the redundant global MiniMax auto-setup script was removed.
+
+### Fixed
+
+- Direct launches now accept an environment-only credential or either one of
+  the Plan/API surfaces without requiring every declared Keychain item to
+  exist.
+- Provider assets are included in clean checkouts and release archives, and a
+  failed asset preparation step tears down any proxy started during prelaunch.
+- Unified route construction propagates ambiguous or invalid provider errors
+  instead of silently omitting the route.
+- Local gateway credentials accept both Claude Code authentication headers but
+  strip them before forwarding, and launch signal handoff cleans up the Claude
+  child, proxy, hooks, and temporary assets exactly once.
 
 ## [0.5.0] - 2026-08-08
 
@@ -237,6 +257,35 @@ Code were diffed before/after and are byte-identical, except for the two
   0 is an OpenRouter *account* backend setting — set it at
   openrouter.ai/settings, crouter can't toggle it.
 
+## [0.4.14] - 2026-08-04
+
+### Fixed
+- **`openai` provider header shape (silent `crouter all` 401 + direct-launch
+  both-headers bug).** Added `_AUTH_SCHEME="bearer"` in `providers/openai.sh`
+  so `lib/launch.sh:70-78` takes the bearer-only branch (was falling into
+  the `*)` both-headers branch and emitting both `Authorization: Bearer` and
+  `x-api-key:`). OpenAI's compat Messages API rejects `x-api-key:`. Caught
+  by an ultracode audit pass on the 0.4.13 changes.
+- **`codex` `CONTEXT_TOKENS` was an order of magnitude low.** Was 272000
+  (Codex CLI's per-run cap), should be 1050000 — GPT-5.6 family ships with
+  a 1.05M-token context window per icebear's own `src/ollama/bridge.ts`
+  context table.
+- **`codex` `HEALTH_CHECK_URL`** pointed at `/`; now points at
+  `http://localhost:8080/health` (the endpoint icebear actually exposes
+  for probes — `src/routes/admin/health.ts`).
+- **`test/smoke.sh`** section heading updated — "Dual-source providers"
+  no longer lists `openai` (which is single-surface keychain now).
+
+### Added
+- **`test/header-shape.sh`** — non-hermetic integration test for providers
+  with non-Anthropic auth headers. Captures the headers `crouter openai`
+  sends to `api.openai.com` and asserts `Authorization: Bearer` is present
+  while `x-api-key:` is absent (OpenAI's compat Messages API rejects
+  x-api-key). Skips cleanly when prerequisites are missing (no keychain
+  entry, no `nc`, no `python3`). Run locally after editing
+  `providers/openai.sh` or `lib/launch.sh`; not part of the default
+  `./test/smoke.sh` CI gate.
+
 ## [0.4.13] - 2026-08-04
 
 ### Added
@@ -317,35 +366,6 @@ Code were diffed before/after and are byte-identical, except for the two
   `gpt-5.6-terra` (default) / `gpt-5.6-luna` (all 1.05M ctx / 128K max out);
   auth via Keychain
   service `openai-api-key` (matches the `deepseek` house pattern); `EFFORT="high"`.
-
-## [0.4.14] - 2026-08-04
-
-### Fixed
-- **`openai` provider header shape (silent `crouter all` 401 + direct-launch
-  both-headers bug).** Added `_AUTH_SCHEME="bearer"` in `providers/openai.sh`
-  so `lib/launch.sh:70-78` takes the bearer-only branch (was falling into
-  the `*)` both-headers branch and emitting both `Authorization: Bearer` and
-  `x-api-key:`). OpenAI's compat Messages API rejects `x-api-key:`. Caught
-  by an ultracode audit pass on the 0.4.13 changes.
-- **`codex` `CONTEXT_TOKENS` was an order of magnitude low.** Was 272000
-  (Codex CLI's per-run cap), should be 1050000 — GPT-5.6 family ships with
-  a 1.05M-token context window per icebear's own `src/ollama/bridge.ts`
-  context table.
-- **`codex` `HEALTH_CHECK_URL`** pointed at `/`; now points at
-  `http://localhost:8080/health` (the endpoint icebear actually exposes
-  for probes — `src/routes/admin/health.ts`).
-- **`test/smoke.sh`** section heading updated — "Dual-source providers"
-  no longer lists `openai` (which is single-surface keychain now).
-
-### Added
-- **`test/header-shape.sh`** — non-hermetic integration test for providers
-  with non-Anthropic auth headers. Captures the headers `crouter openai`
-  sends to `api.openai.com` and asserts `Authorization: Bearer` is present
-  while `x-api-key:` is absent (OpenAI's compat Messages API rejects
-  x-api-key). Skips cleanly when prerequisites are missing (no keychain
-  entry, no `nc`, no `python3`). Run locally after editing
-  `providers/openai.sh` or `lib/launch.sh`; not part of the default
-  `./test/smoke.sh` CI gate.
 
 ## [0.4.11] - 2026-08-03
 

@@ -1,7 +1,8 @@
 # Upstream PR: add gpt-oss family to `getModelFamily` / `isSupportedModel`
 
 ## Status
-**Submitted**: https://github.com/badrisnarayanan/antigravity-claude-proxy/pull/362
+**Open (checked 2026-08-09)**:
+https://github.com/badrisnarayanan/antigravity-claude-proxy/pull/362
 
 ## Repository
 - Upstream: `badrisnarayanan/antigravity-claude-proxy`
