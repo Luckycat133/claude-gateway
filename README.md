@@ -103,9 +103,6 @@ crouter all                           # start the unified gateway + Claude Code
 > Claude Code version; even if the list does not auto-populate, typing the
 > namespaced model (e.g. `/model ollama/qwen3.5:2b`) works.
 
-> **Verified (2026-08-02):** real `crouter all` traffic to `ollama/qwen3.5:2b`
-> and `deepseek/deepseek-v4-flash` (keypool) both returned HTTP 200.
-
 ## How it works
 
 The entry point:
@@ -478,33 +475,27 @@ The Antigravity proxy is an unofficial integration. Do not use it with a primary
 
 ### Ollama (local / cloud open-weight models)
 
-Ollama v0.14.0+ exposes the Anthropic Messages API natively on `http://localhost:11434`, so Claude Code talks to it with **no translation proxy and no API key** — only a dummy `ANTHROPIC_AUTH_TOKEN` (Ollama ignores its value). `providers/ollama.sh` sets `AUTH_MODE="none"` and injects `ANTHROPIC_AUTH_TOKEN=ollama` via `EXTRA_ENV`; `PRE_START` verifies the Ollama service is up and `HEALTH_CHECK_URL` lets `doctor` check it.
+Ollama exposes the Anthropic Messages API natively on `http://localhost:11434`, so Claude Code talks to it with **no translation proxy and no API key**. The provider retains dummy, non-empty Anthropic credentials because Claude Code requires them; Ollama ignores their values. `PRE_START` verifies that the Ollama service is running, and `HEALTH_CHECK_URL` lets `doctor` check it.
 
 One-time setup:
 
 ```sh
-ollama pull glm-4.7-flash            # default; qwen3.5:2b verified locally; or qwen3-coder / gpt-oss:20b / a :cloud model
+ollama pull glm-4.7-flash            # repository default
 ```
 
-Launch (override the model per session — Claude Code requests opus/sonnet/haiku tiers internally):
+The default model is configurable and depends on what is available through your Ollama installation. Launch it directly, or override it per session with another local or cloud model ID:
 
 ```sh
-crouter ollama --model glm-4.7-flash
-```
-
-To make the default tier aliases "just work", alias a local model to a tier name:
-
-```sh
-ollama cp glm-4.7-flash claude-3-5-sonnet
+crouter ollama
+crouter ollama qwen3.5:2b
+crouter ollama --model qwen3-coder
 ```
 
 | Claude Code selection | Ollama model |
 | --- | --- |
-| Default / opus / sonnet / haiku / subagents | `glm-4.7-flash` (the `MODEL_*` defaults in `providers/ollama.sh`) |
+| Default / opus / sonnet / haiku / subagents | `glm-4.7-flash` unless overridden with an available Ollama model ID |
 
-Note: Ollama defaults a model's context window small; agentic Claude Code needs a large one. The provider sets `CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536` as a safe floor — raise it per your VRAM (bake `num_ctx` into a Modelfile, or set `OLLAMA_CONTEXT_LENGTH` before `ollama serve`). Optional `EFFORT` (e.g. `medium`) is available for thinking-capable models; leave it empty otherwise.
-
-> **Verified (2026-08-02):** started `ollama serve` and ran `crouter ollama --model qwen3.5:2b -p "Reply with exactly one word: pong"` end-to-end — Claude Code connected via the injected `ANTHROPIC_BASE_URL=http://localhost:11434` + `ANTHROPIC_AUTH_TOKEN=ollama` and returned `pong`. No proxy, no API key.
+The provider's `CONTEXT_TOKENS=65536` configures Claude Code's client-side context limit. Ollama must separately allocate enough context for the selected model and hardware; configure `OLLAMA_CONTEXT_LENGTH` for the server or `num_ctx` for the model. Coding and agent workloads should use at least 64K when resources allow. Optional `EFFORT` (for example, `medium`) is available for thinking-capable models; leave it empty otherwise.
 
 ### DashScope (Alibaba Cloud Model Studio / Qwen)
 
