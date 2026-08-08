@@ -573,12 +573,13 @@ case $cmd in
   help|-h|--help) usage ;;
   version|-V|--version) info "crouter $VERSION"; exit 0 ;;
   list)
-    if [ "${1:-}" = keys ]; then
-      [ $# -ge 2 ] || die "usage: crouter list keys <provider>"
-      cmd_list_keys "$2"
-    else
-      cmd_list
-    fi
+    case "${1:-}" in
+      keys)  # back-compat: crouter list keys <provider>
+        [ $# -ge 2 ] || die "usage: crouter list [keys] <provider>"
+        cmd_list_keys "$2" ;;
+      "")     cmd_list ;;
+      *)      cmd_list_keys "$1" ;;
+    esac
     ;;
   doctor)         cmd_doctor "${1:-}" ;;
   add)            [ $# -ge 1 ] || die "usage: crouter add <provider> [--surface main|plus] [--name <service>]"; cmd_add_key "$@" ;;
