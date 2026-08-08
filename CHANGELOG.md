@@ -23,8 +23,9 @@ All notable changes to this local setup are documented in this file.
 
 ### Changed
 
-- CI now checks the extensionless shell entry points, all Node entry points,
-  release metadata, and every offline test under both `sh` and `dash`.
+- CI now runs on mainline and `codex/**` release branches and checks the
+  extensionless shell entry points, all Node entry points, release metadata,
+  and every offline test under both `sh` and `dash`.
 - The Codex provider documentation now matches its port-19000 health gate and
   current Sol/Terra/Luna tier mapping instead of retaining the obsolete port
   8080 implementation plan.
