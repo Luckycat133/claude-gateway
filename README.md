@@ -483,17 +483,20 @@ One-time setup:
 ollama pull glm-4.7-flash            # repository default
 ```
 
-The default model is configurable and depends on what is available through your Ollama installation. Launch it directly, or override it per session with another local or cloud model ID:
+The repository default must be available through your Ollama installation. A positional model ID or `--model` overrides only the primary model for that session; the opus, sonnet, haiku, and subagent mappings remain at the provider defaults.
 
 ```sh
-crouter ollama
-crouter ollama qwen3.5:2b
-crouter ollama --model qwen3-coder
+crouter ollama                       # use the repository default
+crouter ollama qwen3.5:2b            # override the primary model only
+crouter ollama --model qwen3-coder   # equivalent explicit form
 ```
 
 | Claude Code selection | Ollama model |
 | --- | --- |
-| Default / opus / sonnet / haiku / subagents | `glm-4.7-flash` unless overridden with an available Ollama model ID |
+| Primary model | `glm-4.7-flash`, or the positional/`--model` session override |
+| Opus / sonnet / haiku / subagents | `glm-4.7-flash`; primary-model overrides do not change these mappings |
+
+There is no one-shot CLI option to override every tier mapping for a session. Persistent customization requires changing the model mappings in `providers/ollama.sh`.
 
 The provider's `CONTEXT_TOKENS=65536` configures Claude Code's client-side context limit. Ollama must separately allocate enough context for the selected model and hardware; configure `OLLAMA_CONTEXT_LENGTH` for the server or `num_ctx` for the model. Coding and agent workloads should use at least 64K when resources allow. Optional `EFFORT` (for example, `medium`) is available for thinking-capable models; leave it empty otherwise.
 
