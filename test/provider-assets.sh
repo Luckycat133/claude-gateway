@@ -138,7 +138,12 @@ die() { printf 'FAIL  %s\n' "$*" >&2; exit 1; }
 . "$ROOT_DIR/lib/assets.sh"
 prepare_provider_assets
 [ -f "$PROVIDER_MCP_CONFIG" ] || { printf 'FAIL  session MCP config not created\n' >&2; exit 1; }
-[ "$(stat -f '%Lp' "$PROVIDER_MCP_CONFIG" 2>/dev/null || stat -c '%a' "$PROVIDER_MCP_CONFIG")" = 600 ] || {
+if _mcp_mode=$(stat -f '%Lp' "$PROVIDER_MCP_CONFIG" 2>/dev/null); then
+  :
+else
+  _mcp_mode=$(stat -c '%a' "$PROVIDER_MCP_CONFIG")
+fi
+[ "$_mcp_mode" = 600 ] || {
   printf 'FAIL  session MCP config is not mode 600\n' >&2; exit 1;
 }
 [ "$PROVIDER_PLUGIN_DIRS" = "$ASSET_PLAN_PLUGIN_DIRS" ] || {
