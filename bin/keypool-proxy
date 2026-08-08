@@ -21,10 +21,9 @@
 //                      explicit, heterogeneous attempt list. Each entry:
 //                        {"url": "...", "type": "bearer|x-api-key|both", "token": "...",
 //                         "model_map": {"logical model":"upstream model"}}
-//                      Used by dual-source providers and explicit billing surfaces
-//                      where the preferred "default account" (subscription OAuth,
-//                      Bearer) and the fallback API key (x-api-key) need DIFFERENT
-//                      auth headers and possibly different URLs.
+//                      Used by legacy dual-source providers and explicit billing
+//                      surfaces whose plan/API credentials need different auth
+//                      headers, model maps, or URLs.
 //
 // Attempt ordering: with KEYPOOL_CANDIDATES it is exactly the array order.
 // Otherwise, for each target, try every key — all keys on the first surface are
@@ -34,6 +33,13 @@
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
+const {
+  applyAuth,
+  createCandidateCooldown,
+  forwardHeaders,
+  isRetryableStatus,
+  requestToken,
+} = require('../lib/proxy-common.js');
 
 function fail(msg) {
   process.stderr.write('keypool-proxy: ' + msg + '\n');
@@ -43,12 +49,6 @@ function fail(msg) {
 const PORT = parseInt(process.env.KEYPOOL_PORT, 10);
 if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) fail('KEYPOOL_PORT missing/invalid');
 const CLIENT_TOKEN = process.env.KEYPOOL_CLIENT_TOKEN || '';
-
-function requestToken(req) {
-  const authorization = String(req.headers.authorization || '');
-  if (authorization.slice(0, 7).toLowerCase() === 'bearer ') return authorization.slice(7);
-  return String(req.headers['x-api-key'] || req.headers['anthropic-auth-token'] || '');
-}
 
 const RAW_CANDIDATES = (process.env.KEYPOOL_CANDIDATES || '').trim();
 const USE_CANDIDATES = RAW_CANDIDATES.length > 0;
@@ -124,13 +124,22 @@ const MAX_RETRY = process.env.KEYPOOL_MAX_RETRY
   ? parseInt(process.env.KEYPOOL_MAX_RETRY, 10)
   : ATTEMPTS.length;
 if (!MAX_RETRY || MAX_RETRY < 1) fail('KEYPOOL_MAX_RETRY invalid');
+let CANDIDATE_COOLDOWN;
+try {
+  CANDIDATE_COOLDOWN = createCandidateCooldown(
+    ATTEMPTS.length,
+    process.env.CROUTER_CANDIDATE_COOLDOWN_MS,
+  );
+} catch (error) {
+  fail(error.message);
+}
 
 function log(msg) {
   process.stderr.write('keypool-proxy: ' + msg + '\n');
 }
 
 const server = http.createServer((clientReq, clientRes) => {
-  if (CLIENT_TOKEN && requestToken(clientReq) !== CLIENT_TOKEN) {
+  if (CLIENT_TOKEN && requestToken(clientReq.headers) !== CLIENT_TOKEN) {
     clientReq.resume();
     clientRes.writeHead(401, {
       'content-type': 'application/json',
@@ -147,7 +156,8 @@ const server = http.createServer((clientReq, clientRes) => {
   });
   clientReq.on('end', () => {
     const body = Buffer.concat(chunks, size);
-    attempt(0, clientReq, clientRes, body, MAX_RETRY);
+    const order = CANDIDATE_COOLDOWN.order();
+    attempt(order, 0, clientReq, clientRes, body, Math.min(MAX_RETRY, order.length));
   });
   clientReq.on('error', (e) => {
     log('client req error: ' + e.message);
@@ -155,13 +165,14 @@ const server = http.createServer((clientReq, clientRes) => {
   });
 });
 
-function attempt(i, clientReq, clientRes, body, remaining) {
-  if (i >= ATTEMPTS.length || remaining <= 0) {
+function attempt(order, position, clientReq, clientRes, body, remaining) {
+  if (position >= order.length || remaining <= 0) {
     clientRes.writeHead(502, { 'content-type': 'application/json' });
     clientRes.end(JSON.stringify({ error: { type: 'keypool_exhausted', message: 'all keys/retries exhausted' } }));
     return;
   }
-  const cand = ATTEMPTS[i];
+  const candidateIndex = order[position];
+  const cand = ATTEMPTS[candidateIndex];
   const target = cand.target;
 
   let upstreamBody = body;
@@ -185,30 +196,8 @@ function attempt(i, clientReq, clientRes, body, remaining) {
     }
   }
 
-  const headers = {};
-  for (const [h, v] of Object.entries(clientReq.headers)) {
-    const lh = h.toLowerCase();
-    if (
-      lh === 'host' || lh === 'authorization' || lh === 'x-api-key' ||
-      lh === 'anthropic-auth-token' || lh === 'connection' || lh === 'proxy-connection'
-    ) continue;
-    headers[h] = v;
-  }
-  // Auth header shape matters: an Anthropic subscription OAuth token MUST go out
-  // as `Authorization: Bearer` only — sending it as x-api-key gets it rejected.
-  if (cand.type === 'bearer') {
-    headers['authorization'] = 'Bearer ' + cand.token;
-  } else if (cand.type === 'x-api-key') {
-    headers['x-api-key'] = cand.token;
-  } else if (cand.type === 'both') {
-    headers['x-api-key'] = cand.token;
-    headers['authorization'] = 'Bearer ' + cand.token;
-  }
-  // type === 'none': send no credential at all (local endpoints like ollama).
-  if (bodyChanged) {
-    delete headers['content-length'];
-    delete headers['transfer-encoding'];
-  }
+  const headers = forwardHeaders(clientReq.headers, bodyChanged);
+  applyAuth(headers, cand.type, cand.token, false);
 
   const path = target.pathBase + (clientReq.url || '/');
   const options = {
@@ -223,8 +212,9 @@ function attempt(i, clientReq, clientRes, body, remaining) {
   const transport = target.protocol === 'https:' ? https : http;
   const upstream = transport.request(options, (upRes) => {
     const status = upRes.statusCode;
-    const transient = status === 401 || status === 402 || status === 403 || status === 429;
+    const transient = isRetryableStatus(status);
     if (!transient) {
+      CANDIDATE_COOLDOWN.clear(candidateIndex);
       // Success or non-retryable error: pipe straight through.
       if (!clientRes.headersSent) clientRes.writeHead(status, upRes.headers);
       upRes.pipe(clientRes);
@@ -232,12 +222,13 @@ function attempt(i, clientReq, clientRes, body, remaining) {
     }
     // Transient (quota / auth): read body, then rotate to next key.
     const buf = [];
+    CANDIDATE_COOLDOWN.fail(candidateIndex, upRes.headers);
     upRes.on('data', (c) => buf.push(c));
     upRes.on('end', () => {
       const nextRemaining = remaining - 1;
-      if (nextRemaining > 0 && i + 1 < ATTEMPTS.length) {
+      if (nextRemaining > 0 && position + 1 < order.length) {
         log(cand.label + ' got ' + status + ' -> rotating (remaining=' + nextRemaining + ')');
-        attempt(i + 1, clientReq, clientRes, body, nextRemaining);
+        attempt(order, position + 1, clientReq, clientRes, body, nextRemaining);
       } else {
         log(cand.label + ' got ' + status + ' -> exhausted');
         if (!clientRes.headersSent) clientRes.writeHead(status, upRes.headers);
@@ -248,9 +239,10 @@ function attempt(i, clientReq, clientRes, body, remaining) {
 
   upstream.on('error', (e) => {
     log('upstream error (' + cand.label + '): ' + e.message);
+    CANDIDATE_COOLDOWN.fail(candidateIndex);
     const nextRemaining = remaining - 1;
-    if (nextRemaining > 0 && i + 1 < ATTEMPTS.length) {
-      attempt(i + 1, clientReq, clientRes, body, nextRemaining);
+    if (nextRemaining > 0 && position + 1 < order.length) {
+      attempt(order, position + 1, clientReq, clientRes, body, nextRemaining);
     } else {
       clientRes.writeHead(502, { 'content-type': 'application/json' });
       clientRes.end(JSON.stringify({ error: { type: 'keypool_upstream_error', message: e.message } }));

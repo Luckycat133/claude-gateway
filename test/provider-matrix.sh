@@ -22,7 +22,11 @@ load() { load_provider "$1"; }
 [ ! -e "$PROVIDERS_DIR/baichuan.sh" ] || die "Baichuan exposes OpenAI compatibility only; remove the invalid provider"
 
 load anthropic
-assert_eq anthropic.context 1048576 "$CONTEXT_TOKENS"
+assert_eq anthropic.auth env "$AUTH_MODE"
+assert_eq anthropic.auth-env ANTHROPIC_API_KEY "$AUTH_REFERENCE"
+assert_eq anthropic.auth-header x-api-key "$_AUTH_SCHEME"
+assert_eq anthropic.context '' "$CONTEXT_TOKENS"
+assert_eq anthropic.extras claude-fable-5 "$MODEL_ALIASES"
 
 load openrouter
 assert_eq openrouter.model openrouter/free "$MODEL"
@@ -92,10 +96,16 @@ assert_eq dashscope-coding.plan.url https://coding.dashscope.aliyuncs.com/apps/a
 
 load deepseek
 assert_eq deepseek.auth surfaces "$AUTH_MODE"
-assert_eq deepseek.model deepseek-v4-flash "$MODEL"
+assert_eq deepseek.model 'deepseek-v4-pro[1m]' "$MODEL"
+assert_eq deepseek.opus 'deepseek-v4-pro[1m]' "$MODEL_OPUS"
+assert_eq deepseek.sonnet 'deepseek-v4-pro[1m]' "$MODEL_SONNET"
+assert_eq deepseek.haiku deepseek-v4-flash "$MODEL_HAIKU"
+assert_eq deepseek.subagent deepseek-v4-flash "$MODEL_SUBAGENT"
 assert_eq deepseek.context 1000000 "$CONTEXT_TOKENS"
+assert_eq deepseek.auto-compact 786432 "$AUTO_COMPACT_TOKENS"
 assert_eq deepseek.api.url https://api.deepseek.com/anthropic "$API_URL"
 assert_eq deepseek.api.auth x-api-key "$API_AUTH_TYPE"
+assert_eq deepseek.api.model deepseek-v4-pro "$API_MODEL"
 
 load siliconflow
 assert_eq siliconflow.auth surfaces "$AUTH_MODE"

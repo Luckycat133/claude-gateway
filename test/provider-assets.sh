@@ -187,5 +187,11 @@ cleanup_provider_assets
 [ -f "$ROOT_DIR/assets/plugins/stepfun-plan/skills/step-search/SKILL.md" ] || {
   printf 'FAIL  StepFun search skill missing\n' >&2; exit 1;
 }
+[ -f "$ROOT_DIR/assets/plugins/dashscope-token-plan/.claude-plugin/plugin.json" ] || {
+  printf 'FAIL  DashScope Token Plan session plugin manifest missing\n' >&2; exit 1;
+}
+[ -f "$ROOT_DIR/assets/plugins/dashscope-token-plan/skills/dashscope-media/SKILL.md" ] || {
+  printf 'FAIL  DashScope Token Plan media skill missing\n' >&2; exit 1;
+}
 
 printf 'ok    provider MCP/skill profiles are isolated and session-scoped\n'

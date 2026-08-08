@@ -61,6 +61,7 @@ _upstream_port=$(cat "$TMP_DIR/upstream.port")
 
 _candidates=$(printf '[{"url":"http://127.0.0.1:%s","type":"bearer","token":"plan-token","label":"plan"},{"url":"http://127.0.0.1:%s","type":"x-api-key","token":"api-token","label":"api"}]' "$_upstream_port" "$_upstream_port")
 KEYPOOL_CANDIDATES="$_candidates" KEYPOOL_PORT=0 KEYPOOL_MAX_RETRY=2 \
+  CROUTER_CANDIDATE_COOLDOWN_MS=200 \
   KEYPOOL_CLIENT_TOKEN="local-secret" \
   "$NODE_BIN" "$ROOT_DIR/bin/keypool-proxy" > "$TMP_DIR/pool.out" 2> "$TMP_DIR/pool.err" &
 POOL_PID=$!
@@ -91,15 +92,33 @@ _second=$(curl -sS -o "$TMP_DIR/second.body" -w '%{http_code}' \
   -X POST "http://127.0.0.1:$_pool_port/v1/messages" \
   -H 'authorization: Bearer local-secret' \
   -H 'content-type: application/json' -d '{"model":"logical-model","messages":[]}')
+sleep 0.25
+_third=$(curl -sS -o "$TMP_DIR/third.body" -w '%{http_code}' \
+  -X POST "http://127.0.0.1:$_pool_port/v1/messages" \
+  -H 'authorization: Bearer local-secret' \
+  -H 'content-type: application/json' -d '{"model":"logical-model","messages":[]}')
 _seen=$(cat "$TMP_DIR/seen" 2>/dev/null || true)
 
-if [ "$_first" != 200 ] || [ "$_second" != 200 ]; then
-  printf 'FAIL  per-request retry budget returned HTTP %s then %s\n' "$_first" "$_second" >&2
+if [ "$_first" != 200 ] || [ "$_second" != 200 ] || [ "$_third" != 200 ]; then
+  printf 'FAIL  candidate cooldown returned HTTP %s, %s, %s\n' "$_first" "$_second" "$_third" >&2
   exit 1
 fi
-[ "$_seen" = 'plan,api,plan,api' ] || {
-  printf 'FAIL  expected plan,api,plan,api; saw %s\n' "$_seen" >&2
+[ "$_seen" = 'plan,api,api,plan,api' ] || {
+  printf 'FAIL  expected plan,api,api,plan,api; saw %s\n' "$_seen" >&2
   exit 1
 }
 
-printf 'ok    HTTP 402/403 rotate candidates and each request gets a fresh retry budget\n'
+ROOT_DIR="$ROOT_DIR" "$NODE_BIN" - <<'NODE'
+const assert = require('assert');
+const {createCandidateCooldown} = require(process.env.ROOT_DIR + '/lib/proxy-common.js');
+let now = 10_000;
+Date.now = () => now;
+const cooldown = createCandidateCooldown(2, '200');
+cooldown.fail(0, {'retry-after': '1'});
+now += 500;
+assert.deepStrictEqual(cooldown.order(), [1, 0]);
+now += 501;
+assert.deepStrictEqual(cooldown.order(), [0, 1]);
+NODE
+
+printf 'ok    quota failures cool down a plan, honor Retry-After, and keep API fallback live\n'

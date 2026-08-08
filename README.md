@@ -3,8 +3,9 @@
 `crouter` launches Claude Code against audited Anthropic-compatible providers
 without copying provider credentials into this repository. It keeps Token Plan
 keys, pay-as-you-go API keys, endpoints, auth headers, and model mappings as
-separate routing surfaces, then fails over on HTTP 401/402/403/429 without restarting
-the Claude Code session.
+separate routing surfaces. It fails over on HTTP 401/402/403/429 without
+restarting Claude Code and temporarily cools down an exhausted candidate so
+the next request does not immediately spend another retry on it.
 
 The current provider values were checked against vendor documentation on
 2026-08-08. See [docs/provider-audit.md](docs/provider-audit.md) for the source
@@ -38,14 +39,20 @@ crouter list
 crouter provider show dashscope
 crouter doctor minimax
 
+crouter claude                     # native Claude account login
+crouter anthropic                  # Anthropic Console API key
 crouter minimax
 crouter dashscope qwen3.7-max
-crouter deepseek --model deepseek-v4-pro
+crouter deepseek --model 'deepseek-v4-pro[1m]'
 
 crouter add minimax --surface plan
 crouter add minimax --surface api
+pass show minimax/plan | crouter add minimax --surface plan --stdin
 crouter list keys minimax
 crouter remove minimax --surface api --name minimax-api-2
+
+crouter all --check               # redacted route proof, no launch/network
+crouter all
 ```
 
 The first bare argument before any flag is a primary-model override. Remaining
@@ -60,14 +67,14 @@ limit; the selected vendor model or native backend remains authoritative.
 | --- | --- | --- | ---: | --- |
 | `302ai` | API | `claude-sonnet-5` | 1,000,000 | — |
 | `aihubmix` | API | `coding-glm-5.1-free` | — | API MCP |
-| `anthropic` | subscription OAuth + API | `claude-sonnet-5` | 1,048,576 | — |
+| `anthropic` | Console API key | `claude-sonnet-5` | — | — |
 | `antigravity` | local proxy | `gemini-3.1-pro-low` | 1,048,576 | — |
 | `antigravity-claude` | local proxy | `claude-opus-4-6-thinking` | 200,000 | — |
 | `bedrock` | native AWS credentials | `sonnet` alias | — | — |
 | `codex` | local ChatGPT subscription proxy | `gpt-5.6-sol` | 1,050,000 | — |
-| `dashscope` | Token Plan + API | `qwen3.8-max` | 983,616 | API WebSearch MCP |
+| `dashscope` | Token Plan + API | `qwen3.8-max` | 983,616 | Plan media skill + API WebSearch MCP |
 | `dashscope-coding` | Coding Plan | `qwen3.7-plus` | — | — |
-| `deepseek` | API | `deepseek-v4-flash` | 1,000,000 | — |
+| `deepseek` | API | `deepseek-v4-pro[1m]` | 1,000,000 | native web search |
 | `huawei` | Token Plan + API | `glm-5.1` | — | — |
 | `infini` | GenStudio API | `glm-5.1` | — | — |
 | `minimax` | Token Plan + API | `MiniMax-M3` | 1,048,576 | Plan MCP + CLI skill |
@@ -87,6 +94,9 @@ limit; the selected vendor model or native backend remains authoritative.
 | `volcengine` | Ark Coding Plan | `doubao-seed-2.0-code` | — | public docs MCP |
 | `xiaomi` | Token Plan + API | `mimo-v2.5-pro[1m]` | 1,048,576 | — |
 | `z-ai` | Coding Plan + API | `glm-5.2[1m]` | 1,000,000 | vision/search/reader/zread MCPs |
+
+DeepSeek additionally follows its official 786,432-token automatic compaction
+threshold; this is kept separate from its 1M maximum context.
 
 OpenAI and Baichuan are intentionally absent. Their official APIs do not expose
 an Anthropic Messages base URL that Claude Code can call directly. `codex`
@@ -110,8 +120,8 @@ Qwen catalog; an API key stays on the pay-as-you-go endpoint and maps the same
 logical tiers to the API catalog. Explicit models outside that tier map pass
 through unchanged.
 
-Environment credentials take priority, followed by every Keychain service in
-the provider file:
+Environment credentials take priority, followed by built-in Keychain services
+and user-added services in the local key registry:
 
 | Provider | Plan environment variable | API environment variable |
 | --- | --- | --- |
@@ -140,14 +150,41 @@ the provider file:
 Use `crouter provider show <name>` to inspect the URL, auth type, Keychain
 service names, and tier maps without revealing secrets.
 
+### Key management
+
+`crouter add` stores only the secret in macOS Keychain. The first key fills the
+provider's built-in service; subsequent keys get names such as
+`minimax-plan-2` in a mode-600 registry under `.state/keypools/`. Provider files
+are never edited, so an upgrade cannot overwrite the user's pool. Use `--name`
+for a stable service name and `--stdin` with a password manager or CI; the key
+never appears in process arguments.
+
+For a provider with both surfaces, candidate order is plan environment key,
+plan Keychain pool, API environment key, then API Keychain pool. `crouter list
+keys <provider>` reports which references exist without printing their values.
+
 ### Failover behavior
 
 Direct launches start a localhost-only proxy for surface providers. It tries
 credentials in declaration order and advances on 401/402/403/429 or connection
 failure. HTTP 403 is included because some plans report expired or missing
-entitlements with that status.
+entitlements with that status. A rejected candidate is cooled down for five
+minutes by default, or for the upstream `Retry-After` duration when longer.
+Set `CROUTER_CANDIDATE_COOLDOWN_MS` to a non-negative millisecond value to
+change the floor.
 The proxy rewrites only known logical tier models for the active surface and
 preserves other model IDs. It is stopped when Claude Code exits.
+
+### Anthropic account and API access
+
+`crouter claude` is a transparent native launch: it preserves Claude Code's
+stored `/login` session, `CLAUDE_CODE_OAUTH_TOKEN`, `HOME`, and normal settings,
+and injects no provider URL or API credential. `crouter anthropic` is separate
+and uses only an Anthropic Console `ANTHROPIC_API_KEY` or the
+`anthropic-api-key` Keychain item. Personal subscription OAuth credentials are
+not sent through crouter's proxy or unified gateway. This keeps the official
+Claude account flow inside Claude Code and prevents API billing from silently
+overriding a subscription login.
 
 The older `AUTH_MODE="keypool"` contract remains supported for custom provider
 files. Its `PLUS_KEYS` are bound only to `PLUS_URL`; they are no longer combined
@@ -193,6 +230,9 @@ Current profiles:
   session-only `minimax-cli` skill using `mmx-cli@1.0.19`.
 - Z.AI: `@z_ai/mcp-server@0.1.4` vision plus the official remote web search,
   web reader, and zread MCP endpoints.
+- DashScope Token Plan: a namespaced media skill for the official image,
+  video, and speech endpoints. The plan credential is supplied only as a
+  session environment variable and never placed in command arguments.
 - DashScope API: official Model Studio WebSearch MCP. It is omitted when only a
   Token Plan credential is available because that MCP requires the API key.
 - Step Plan: official StepSearch (`web_search` and `web_fetch`) and a matching
@@ -205,8 +245,18 @@ Current profiles:
 - PPIO: official cloud-management MCP. It uses its own OAuth 2.1 flow rather
   than copying the LLM API key into the MCP profile.
 
-Vendors without a documented plan MCP get an intentionally empty strict
-profile. crouter does not invent or install unofficial MCP packages.
+DeepSeek's documented web search is a server-side model tool rather than a
+downloadable MCP. Kimi documents how users can add generic MCPs and skills to
+Kimi CLI, but not a Kimi-owned Claude Code plan package. Those providers, and
+every other vendor without a documented plan-specific asset, get an
+intentionally empty strict profile. crouter does not invent or install
+unofficial packages.
+
+Local packages are pinned and downloaded on demand by their documented package
+runner; remote MCPs use their official HTTPS endpoint. Disable all managed
+assets with `CROUTER_PROVIDER_ASSETS=0`. To merge rather than replace existing
+MCP configuration, explicitly set `CROUTER_STRICT_PROVIDER_MCP=0` and accept
+the possibility of duplicate or conflicting tool names.
 
 Switch providers by starting the matching direct session, for example
 `crouter minimax` then later `crouter stepfun`. A running Claude Code process
@@ -215,8 +265,9 @@ cannot replace its plugin set dynamically.
 ## Unified gateway
 
 ```sh
+crouter all --check
 crouter all
-/model deepseek/deepseek-v4-pro
+/model 'deepseek/deepseek-v4-pro[1m]'
 /model dashscope/qwen3.7-max
 ```
 
@@ -226,9 +277,24 @@ and per-surface model maps. Its paid `/v1/messages` route requires a random
 per-session local token. Native Bedrock/Vertex routes are excluded because their
 SDK signers live inside Claude Code.
 
+`crouter all --check` builds the same configured route graph, prints only redacted
+URLs, candidate labels/auth shapes, model counts, and the chosen default, then
+exits without starting the gateway or Claude Code. Anthropic becomes the
+default only when an explicit Console API key is configured; otherwise a route
+with discovered remote credentials is preferred over unprobed local proxies.
+The check proves local structure and credential discovery; it cannot prove a
+paid account's remaining quota or live model entitlement without making a
+billable request.
+It also does not run provider `PRE_START` hooks or health probes: configured
+local routes such as Codex, Antigravity, and Ollama must already be running.
+
 The unified gateway switches model traffic only. Provider MCPs and skills are
-fixed when a Claude Code process starts, so use `crouter <provider>` when those
-assets or a native cloud backend are needed.
+fixed when a Claude Code process starts. By default `all` supplies a strict,
+empty MCP profile so stale plan tools and credentials cannot cross providers.
+An explicit Claude `--mcp-config` flag wins; setting
+`CROUTER_STRICT_PROVIDER_MCP=0` keeps the user's existing MCP configuration.
+Use `crouter <provider>` when vendor assets, a stored Claude account login, or a
+native cloud backend are needed.
 
 ## Native Bedrock and Vertex
 
@@ -310,8 +376,10 @@ limits empty instead of guessing. Add an offline contract assertion to
 - Real `config.sh`, credentials, logs, and provider account data are ignored.
 - Secrets are never printed by `list`, `doctor`, `provider show`, or key-list
   commands.
-- `crouter add` reads a key from `/dev/tty` with echo disabled and stores it in
-  macOS Keychain.
+- `crouter add` reads a key from `/dev/tty` with echo disabled, or from stdin
+  when explicitly requested, and stores it in macOS Keychain.
+- User-added pool metadata is mode 600 and contains Keychain service names,
+  never secret values; provider source files stay immutable.
 - Local proxies bind only to `127.0.0.1` and are reaped with the session.
 - Local proxies require random per-session client tokens, so a fixed gateway
   port does not expose loaded provider credentials to other local processes.

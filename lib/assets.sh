@@ -56,6 +56,11 @@ prepare_provider_assets() {
 MINIMAX_REGION=cn"
       fi
       ;;
+    dashscope)
+      if [ -n "${_PLAN_FIRST_TOKEN:-}" ]; then
+        PROVIDER_ASSET_ENV="CROUTER_DASHSCOPE_TOKEN_PLAN_KEY=$_PLAN_FIRST_TOKEN"
+      fi
+      ;;
   esac
 }
 

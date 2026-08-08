@@ -17,15 +17,19 @@ _crouter_providers() {
 
 _crouter_complete() {
   local -a cmds providers
-  cmds=(all list doctor add remove provider config logs uninstall help --version)
+  cmds=(claude all list doctor add remove provider config logs uninstall help --version)
   providers=(${(f)"$(_crouter_providers)"})
   if (( CURRENT == 2 )); then
     # Position 1 is either a subcommand or a provider name (`crouter deepseek`).
     compadd -- $cmds $providers
+  elif [[ "$words[2]" == all ]]; then
+    compadd -- --check
   elif (( CURRENT == 3 )); then
     case "$words[2]" in
       doctor|add|remove|provider|config|logs) compadd -- $providers ;;
     esac
+  elif [[ "$words[2]" == add ]]; then
+    compadd -- --surface --name --stdin plan api
   fi
 }
 compdef _crouter_complete crouter

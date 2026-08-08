@@ -85,7 +85,7 @@ EOF
 
 GATEWAY_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 CROUTER_ROUTES_FILE="$TEST_DIR/routes.json" CROUTER_GATEWAY_PORT="$GATEWAY_PORT" \
-  CROUTER_GATEWAY_TOKEN="gateway-secret" \
+  CROUTER_GATEWAY_TOKEN="gateway-secret" CROUTER_CANDIDATE_COOLDOWN_MS=60000 \
   "$NODE_BIN" "$ROOT_DIR/bin/gateway" >"$TEST_DIR/gateway.out" 2>/dev/null &
 GATEWAY_PID=$!
 _i=0
@@ -124,8 +124,8 @@ SEEN_SEQUENCE=$(cat "$TEST_DIR/seen-sequence" 2>/dev/null || true)
 SEEN_LOCAL_AUTH_HEADER=$(cat "$TEST_DIR/seen-local-auth-header" 2>/dev/null || true)
 if [ "$SEEN_PATH" = '/compat/v1/messages?beta=true' ] &&
    [ "$SEEN_MODEL" = upstream-model ] && [ -z "$SEEN_ENV_HEADER" ] &&
-   [ -z "$SEEN_LOCAL_AUTH_HEADER" ] && [ "$SEEN_SEQUENCE" = plan,api,plan,api ]; then
-  printf 'ok    gateway treats HTTP 402/403 as candidate failover and applies each surface model map\n'
+   [ -z "$SEEN_LOCAL_AUTH_HEADER" ] && [ "$SEEN_SEQUENCE" = plan,api,api ]; then
+  printf 'ok    gateway cools failed plans, falls through to API, and applies each surface model map\n'
 else
   printf 'FAIL  gateway forwarded path=%s model=%s env-header=%s local-auth-header=%s sequence=%s\n' \
     "$SEEN_PATH" "$SEEN_MODEL" "$SEEN_ENV_HEADER" "$SEEN_LOCAL_AUTH_HEADER" "$SEEN_SEQUENCE"

@@ -10,6 +10,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 cat > "$TMP_DIR/claude" <<'MOCK'
 #!/bin/sh
 printf '%s\n' "$@" > "$CAPTURE_FILE"
+printf '%s' "${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-}" > "$COMPACT_CAPTURE"
 exit 0
 MOCK
 chmod +x "$TMP_DIR/claude"
@@ -20,12 +21,13 @@ chmod +x "$TMP_DIR/claude"
   cleanup_provider_assets() { :; }
   CLAUDE_BIN="$TMP_DIR/claude"
   MODEL_OPUS=demo MODEL_SONNET=demo MODEL_HAIKU=demo MODEL_SUBAGENT=demo
-  CONTEXT_TOKENS= EFFORT= AUTH_TOKEN= KEYPOOL_URL= KEYPOOL_PID= POST_STOP=
+  CONTEXT_TOKENS= AUTO_COMPACT_TOKENS=786432 EFFORT= AUTH_TOKEN= KEYPOOL_URL= KEYPOOL_PID= POST_STOP=
   AUTH_MODE=none BASE_URL=https://example.invalid PASSTHROUGH_ENV= NATIVE_BACKEND=
   PROVIDER_MCP_CONFIG="$TMP_DIR/provider-mcp.json"
   PROVIDER_PLUGIN_DIRS="$TMP_DIR/plugin one
 $TMP_DIR/plugin two"
   PROVIDER_ASSET_ENV="CAPTURE_FILE=$TMP_DIR/args
+COMPACT_CAPTURE=$TMP_DIR/compact
 PROVIDER_MARKER=active"
   EXTRA_ENV=
   . "$ROOT_DIR/lib/launch.sh"
@@ -39,6 +41,9 @@ grep -qx -- "$TMP_DIR/provider-mcp.json" "$_args" || { printf 'FAIL  MCP config 
 [ "$(grep -cx -- '--plugin-dir' "$_args")" -eq 2 ] || { printf 'FAIL  provider plugins not injected exactly once each\n' >&2; exit 1; }
 grep -qx -- "$TMP_DIR/plugin one" "$_args" && grep -qx -- "$TMP_DIR/plugin two" "$_args" || {
   printf 'FAIL  provider plugin paths missing\n' >&2; exit 1;
+}
+[ "$(cat "$TMP_DIR/compact")" = 786432 ] || {
+  printf 'FAIL  provider auto-compact window was not injected\n' >&2; exit 1;
 }
 
 printf 'ok    launch isolates provider MCPs and activates provider skills\n'

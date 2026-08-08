@@ -2,8 +2,10 @@
 # crouter - unified launcher for Claude Code against multiple providers.
 #
 # Usage:
+#   crouter claude                        Native Claude Code account/login passthrough
 #   crouter <provider> [<model>] [claude args...]   Launch (optional positional model)
 #   crouter all                           Unified gateway: one URL, switch providers via /model
+#   crouter all --check                   Print the redacted configured route graph; do not launch
 #   crouter list                          List available providers
 #   crouter doctor [provider]             Run environment diagnostics
 #   crouter add <provider>                Add a key to a provider's keychain keypool
@@ -63,7 +65,7 @@ die() { printf 'crouter: %s\n' "$*" >&2; exit 1; }
 info() { printf '%s\n' "$*"; }
 
 usage() {
-  sed -n '2,18p' "$SELF" | sed 's/^# \{0,1\}//'
+  sed -n '/^# Usage:/,/^#$/p' "$SELF" | sed 's/^# \{0,1\}//'
 }
 
 # ---------------------------------------------------------------------------
@@ -86,6 +88,15 @@ run_pre_start() {
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
+cmd_claude() {
+  [ -n "$CLAUDE_BIN" ] || die "claude binary not found; set CLAUDE_BIN in config.sh"
+  [ -x "$CLAUDE_BIN" ] || die "claude binary is not executable: $CLAUDE_BIN"
+  # Deliberately preserve Claude Code's own environment and credential store.
+  # This is the supported path for /login, `claude auth login`, and
+  # CLAUDE_CODE_OAUTH_TOKEN. No crouter endpoint or proxy is inserted.
+  exec "$CLAUDE_BIN" "$@"
+}
+
 cmd_run() {
   _p=$1; shift
   load_provider "$_p"
@@ -176,7 +187,7 @@ cmd_run() {
 
     run_pre_start
     if is_dual_source; then
-      # Preferred "default account" first; when the fallback API key is also
+      # Preferred custom/default credential first; when the API key is also
       # configured, front both with the local proxy so 401/402/403/429 rotates live.
       resolve_dual_source
       start_dual_failover
@@ -303,6 +314,7 @@ cmd_provider_show() {
   printf 'endpoint:    %s\n' "$BASE_URL"
   printf 'default:     %s\n' "$MODEL"
   printf 'context:     %s tokens\n' "${CONTEXT_TOKENS:-<unset>}"
+  printf 'auto compact: %s tokens\n' "${AUTO_COMPACT_TOKENS:-<unset>}"
   printf 'effort:      %s\n' "${EFFORT:-<unset>}"
   printf '\n'
   printf 'aliases:\n'
@@ -368,7 +380,11 @@ cmd_provider_show() {
   fi
   [ "$_skip_auth_case" -eq 1 ] || case "$AUTH_MODE" in
     keychain) printf '  reference: %s\n' "$AUTH_REFERENCE" ;;
-    env)      printf '  reference: %s\n' "$AUTH_REFERENCE" ;;
+    env)
+      printf '  reference: %s\n' "$AUTH_REFERENCE"
+      [ -n "${AUTH_KEYCHAIN_FALLBACK:-}" ] &&
+        printf '  keychain fallback: %s\n' "$AUTH_KEYCHAIN_FALLBACK"
+      ;;
     command)  printf '  reference: %s\n' "$AUTH_REFERENCE" ;;
     static)   printf '  reference: %s (literal placeholder)\n' "$AUTH_REFERENCE" ;;
     none)     ;;
@@ -591,7 +607,7 @@ build_all_routes() {
           static)   _api_key="${AUTH_REFERENCE:-}" ;;
         esac
       fi
-      # DEFAULT-surface token (subscription OAuth, or a configured gateway token).
+      # Legacy/custom DEFAULT-surface token (for example, a gateway token).
       _def_token=""
       if [ -n "${DEFAULT_TOKEN_ENV:-}" ] && [ -n "$(printenv "$DEFAULT_TOKEN_ENV" 2>/dev/null)" ]; then
         _def_token=$(printenv "$DEFAULT_TOKEN_ENV")
@@ -640,15 +656,34 @@ _default_namespaced_model() {
 
 cmd_all() {
   [ -n "$NODE_BIN" ] || die "node not found; unified gateway cannot start"
+  _check=0
+  case ${1:-} in
+    --check) _check=1; shift ;;
+    -h|--help)
+      info "usage: crouter all [--check] [claude args...]"
+      return 0 ;;
+  esac
+  [ "$_check" -eq 0 ] || [ $# -eq 0 ] || die "all --check does not accept Claude arguments"
   _gwpid=""
   trap 'kill "${_gwpid:-}" 2>/dev/null' EXIT INT TERM
   _routes_file=$(build_all_routes) || die "failed to build unified provider routes"
   [ -s "$_routes_file" ] || die "no providers found to build the gateway"
+  if [ "$_check" -eq 1 ]; then
+    if "$NODE_BIN" "$LIB_DIR/route-build.js" inspect "$_routes_file"; then
+      _check_rc=0
+    else
+      _check_rc=$?
+    fi
+    rm -f "$_routes_file"
+    trap - EXIT INT TERM
+    return "$_check_rc"
+  fi
   _out=$(mktemp -t call-gw.XXXXXX)
   _gateway_token=$("$NODE_BIN" -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))") || \
     die "failed to generate a local gateway token"
   CROUTER_ROUTES_FILE="$_routes_file" CROUTER_GATEWAY_PORT="${CROUTER_GATEWAY_PORT:-18799}" \
     CROUTER_GATEWAY_TOKEN="$_gateway_token" \
+    CROUTER_CANDIDATE_COOLDOWN_MS="${CROUTER_CANDIDATE_COOLDOWN_MS:-300000}" \
     "$NODE_BIN" "$BIN_DIR/gateway" > "$_out" 2>/dev/null &
   _gwpid=$!
   _port=""
@@ -677,6 +712,16 @@ cmd_all() {
   CONTEXT_TOKENS=""
   EXTRA_ENV="ANTHROPIC_AUTH_TOKEN=$_gateway_token"
   _bypass_auth=0
+  # A unified process cannot hot-swap provider-owned plugins as /model changes.
+  # Start it with an empty strict MCP profile so stale plan tools/credentials do
+  # not cross providers. Explicit Claude MCP flags still override this profile.
+  PROVIDER_MCP_CONFIG=""
+  PROVIDER_PLUGIN_DIRS=""
+  if [ "${CROUTER_PROVIDER_ASSETS:-1}" != 0 ] &&
+     [ "${CROUTER_STRICT_PROVIDER_MCP:-1}" = 1 ]; then
+    ASSET_PROFILE=empty
+    prepare_provider_assets
+  fi
   launch_claude "$_def" "$_bypass_auth" "$@"
 }
 
@@ -693,7 +738,7 @@ case $cmd in
     esac
     ;;
   doctor)         cmd_doctor "${1:-}" ;;
-  add)            [ $# -ge 1 ] || die "usage: crouter add <provider> [--surface plan|api] [--name <service>]"; cmd_add_key "$@" ;;
+  add)            [ $# -ge 1 ] || die "usage: crouter add <provider> [--surface plan|api] [--name <service>] [--stdin]"; cmd_add_key "$@" ;;
   remove)         [ $# -ge 1 ] || die "usage: crouter remove <provider> --name <service> [--surface plan|api]"; cmd_remove_key "$@" ;;
   provider)
     # Accept both `crouter provider <name>` and the documented
@@ -715,6 +760,7 @@ case $cmd in
       cmd_logs_list
     fi ;;
   uninstall)       cmd_uninstall "$@" ;;
+  claude)          cmd_claude "$@" ;;
   all)            cmd_all "$@" ;;
   *)              cmd_run "$cmd" "$@" ;;
 esac

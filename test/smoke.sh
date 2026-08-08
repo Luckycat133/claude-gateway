@@ -244,17 +244,17 @@ else
   bad "list keys failed for non-keypool provider"
 fi
 
-# remove: --name with -y (non-interactive) on a known service drops it from
-# AUTH_KEYS and deletes the keychain entry.
+# remove: --name with -y (non-interactive) on a built-in service deletes the
+# Keychain entry but leaves the immutable provider catalog declaration intact.
 if fake_gw remove demo --name demo-key-1 -y 2>&1 | grep -q "removed 'demo-key-1'"; then
   ok "remove deletes a key (non-interactive)"
 else
   bad "remove did not confirm"
 fi
-if grep -q 'demo-key-1' "$FAKE_ROOT/providers/demo.sh"; then
-  bad "remove left demo-key-1 in AUTH_KEYS"
+if grep -q '^AUTH_KEYS="demo-key-1"$' "$FAKE_ROOT/providers/demo.sh"; then
+  ok "remove leaves the built-in provider declaration unchanged"
 else
-  ok "remove stripped demo-key-1 from AUTH_KEYS"
+  bad "remove mutated the built-in provider declaration"
 fi
 if [ -f "$MOCK_DIR/kc/demo-key-1" ]; then
   bad "remove left Keychain entry for demo-key-1"
@@ -318,12 +318,12 @@ for _removed in openai baichuan; do
   fi
 done
 
-# Anthropic has its own dual-source account contract; domestic providers use
-# explicit plan/API surface labels; local proxies keep their native auth mode.
-if "$GATEWAY" list 2>/dev/null | awk '$1=="anthropic"{print $(NF-1)}' | grep -q '^dual$'; then
-  ok "anthropic reports dual-source auth"
+# Anthropic API keys and native Claude account login are separate, documented
+# entry points; domestic providers use explicit plan/API surface labels.
+if "$GATEWAY" list 2>/dev/null | awk '$1=="anthropic"{print $(NF-1)}' | grep -q '^env$'; then
+  ok "anthropic reports official API-key auth"
 else
-  bad "anthropic did not report dual-source auth"
+  bad "anthropic did not report official API-key auth"
 fi
 # openrouter has a single API surface (env var, then Keychain fallback) -> never "dual".
 if "$GATEWAY" list 2>/dev/null | awk '$1=="openrouter"{print $(NF-1)}' | grep -q '^env$'; then
@@ -404,23 +404,25 @@ else
   bad "codex did not report none auth"
 fi
 
-# provider show must reveal the surface layout without leaking secrets.
+# provider show must reveal the official API contract without leaking secrets.
 _show=$("$GATEWAY" provider anthropic 2>&1)
-if printf '%s\n' "$_show" | grep -q 'default account first' &&
-   printf '%s\n' "$_show" | grep -q 'CLAUDE_CODE_OAUTH_TOKEN' &&
-   printf '%s\n' "$_show" | grep -q 'ANTHROPIC_API_KEY'; then
-  ok "provider show documents both anthropic surfaces"
+if printf '%s\n' "$_show" | grep -q '^auth:        env$' &&
+   printf '%s\n' "$_show" | grep -q '^  reference: ANTHROPIC_API_KEY$' &&
+   printf '%s\n' "$_show" | grep -q '^  keychain fallback: anthropic-api-key$' &&
+   "$GATEWAY" help | grep -q 'crouter claude' &&
+   "$GATEWAY" help | grep -q 'crouter all --check' &&
+   "$GATEWAY" help | grep -q 'crouter --version'; then
+  ok "provider show documents Anthropic API auth and help exposes native account login"
 else
-  bad "provider show is missing the anthropic surface layout"
+  bad "Anthropic API auth or native Claude account entry point is missing"
 fi
 
-# With no credentials in the environment, doctor must report MISSING (the old
-# AUTH_MODE=none default would have wrongly reported ok).
+# With no API key in the environment/Keychain, doctor must report MISSING.
 if env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u CLAUDE_CODE_OAUTH_TOKEN \
      CLAUDE_BIN="$MOCK_CLAUDE" "$GATEWAY" doctor anthropic 2>&1 | grep -q 'anthropic .*auth:MISSING'; then
-  ok "doctor reports MISSING for an unconfigured dual-source provider"
+  ok "doctor reports MISSING for an unconfigured Anthropic API provider"
 else
-  bad "doctor did not report MISSING for an unconfigured dual-source provider"
+  bad "doctor did not report MISSING for an unconfigured Anthropic API provider"
 fi
 
 # openrouter must explicitly blank ANTHROPIC_API_KEY (upstream requirement).

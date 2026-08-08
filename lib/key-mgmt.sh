@@ -1,7 +1,7 @@
 #!/bin/sh
-# Key management for pooled providers. Explicit surface providers edit
-# PLAN_KEYS/API_KEYS; legacy keypools retain AUTH_KEYS/PLUS_KEYS.
-# Never prints the secret value.
+# Key management for pooled providers. Built-in service names remain in the
+# provider catalog; user-added names live in STATE_DIR/keypools/*.tsv. Secrets
+# live only in the macOS Keychain and are never printed.
 # Depends on: provider.sh (provider_file, load_provider).
 
 # _surface_var <name>   ->  variable name holding the keys for that surface.
@@ -17,6 +17,26 @@ _surface_var() {
       if [ "${AUTH_MODE:-}" = surfaces ]; then printf 'PLAN_KEYS'; else printf 'PLUS_KEYS'; fi
       ;;
     *) die "unknown surface '$1' (expected: plan or api)" ;;
+  esac
+}
+
+_canonical_surface() {
+  case $1 in
+    plan|token-plan|plus)
+      if [ "${AUTH_MODE:-}" = surfaces ]; then printf plan; else printf plus; fi ;;
+    api|api-key|main)
+      if [ "${AUTH_MODE:-}" = surfaces ]; then printf api; else printf main; fi ;;
+    *) die "unknown surface '$1' (expected: plan or api)" ;;
+  esac
+}
+
+_key_var_value() {
+  case $1 in
+    PLAN_KEYS) printf '%s' "${PLAN_KEYS:-}" ;;
+    API_KEYS)  printf '%s' "${API_KEYS:-}" ;;
+    AUTH_KEYS) printf '%s' "${AUTH_KEYS:-}" ;;
+    PLUS_KEYS) printf '%s' "${PLUS_KEYS:-}" ;;
+    *) die "unsupported key variable '$1'" ;;
   esac
 }
 
@@ -39,25 +59,52 @@ _read_kv() {
   ' "$1"
 }
 
-# _write_kv <file> <var> <value>   ->   set VAR="value" in place (single-quoted to keep spaces)
-_write_kv() {
-  _val=$3
-  # Use a delimiter unlikely to appear; values are keychain service names (safe ASCII).
-  _delim=$(printf '\036')
-  # If the variable line is missing, append it. Otherwise replace it.
-  if grep -q "^$2=" "$1" 2>/dev/null; then
-    # shellcheck disable=SC1003
-    # Portable in-place edit: GNU sed's `sed -i ''` parsing differs from BSD sed,
-    # so write to a temp file and rename instead of relying on `sed -i`.
-    sed "s${_delim}^$2=.*${_delim}$2=\"$_val\"${_delim}" "$1" > "$1.tmp" && mv "$1.tmp" "$1"
-  else
-    printf '\n%s="%s"\n' "$2" "$_val" >> "$1"
+_registry_add() {
+  _ra_provider=$1 _ra_surface=$2 _ra_service=$3
+  _ra_file=$(provider_registry_file "$_ra_provider") || die "STATE_DIR is not configured"
+  _ra_dir=$(dirname -- "$_ra_file")
+  (umask 077; mkdir -p "$_ra_dir") || die "cannot create key registry directory: $_ra_dir"
+  chmod 700 "$_ra_dir" 2>/dev/null || true
+  if [ -f "$_ra_file" ] && awk -F '\t' -v s="$_ra_surface" -v n="$_ra_service" \
+      '$1 == s && $2 == n {found=1} END {exit !found}' "$_ra_file"; then
+    return 0
   fi
+  (umask 077; printf '%s\t%s\n' "$_ra_surface" "$_ra_service" >> "$_ra_file") ||
+    die "cannot update key registry: $_ra_file"
+  chmod 600 "$_ra_file" 2>/dev/null || true
+}
+
+_registry_remove() {
+  _rr_provider=$1 _rr_surface=$2 _rr_service=$3
+  _rr_file=$(provider_registry_file "$_rr_provider") || return 0
+  [ -f "$_rr_file" ] || return 0
+  _rr_tmp="$_rr_file.tmp.$$"
+  (umask 077; awk -F '\t' -v s="$_rr_surface" -v n="$_rr_service" \
+    '!( $1 == s && $2 == n )' "$_rr_file" > "$_rr_tmp") || {
+      rm -f "$_rr_tmp"
+      die "cannot update key registry: $_rr_file"
+    }
+  chmod 600 "$_rr_tmp" 2>/dev/null || true
+  mv "$_rr_tmp" "$_rr_file"
+}
+
+_contains_word() {
+  case " $1 " in *" $2 "*) return 0 ;; *) return 1 ;; esac
+}
+
+_first_missing_service() {
+  for _fms_service in $1; do
+    if ! security find-generic-password -a "$USER" -s "$_fms_service" >/dev/null 2>&1; then
+      printf '%s' "$_fms_service"
+      return 0
+    fi
+  done
+  return 1
 }
 
 # _single_key_service <provider>   ->  the Keychain service name a single-key
 # provider should use for `crouter add`, or empty if the mode has no
-# user-managed key. Covers keychain / env(fallback) / dual-source(API_KEY_REF).
+# user-managed key. Covers keychain / env(fallback) / legacy dual-source.
 # keypool, none and static are intentionally NOT served here (pool / proxy).
 _single_key_service() {
   if is_dual_source; then
@@ -89,22 +136,41 @@ _prompt_secret() {
 
 # _keychain_put <service> <value>   ->  add or update (-U) a generic password for current $USER
 _keychain_put() {
-  security add-generic-password -U -a "$USER" -s "$1" -w "$2"
+  # Apple's security(1) marks `-w <password>` as insecure and documents a
+  # trailing `-w` as the prompt/stdin form. Keep the secret out of child argv.
+  printf '%s\n%s\n' "$2" "$2" |
+    security add-generic-password -U -a "$USER" -s "$1" -w 2>/dev/null
 }
 
-# _keychain_delete <service>   ->  delete a generic password if present (no error if missing)
+# _keychain_delete <service>   ->  delete a generic password; missing is okay.
 _keychain_delete() {
-  security delete-generic-password -a "$USER" -s "$1" >/dev/null 2>&1 || true
+  security delete-generic-password -a "$USER" -s "$1" >/dev/null 2>&1
+  _kd_rc=$?
+  case $_kd_rc in
+    0|44) return 0 ;;
+    *) return "$_kd_rc" ;;
+  esac
 }
 
-# _next_key_name <provider> <surface>   ->  suggest "<provider>-2", "<provider>-3", ...
+# _next_key_name <base> <existing refs> -> suggest "<base>-2", "<base>-3", ...
 _next_key_name() {
   _base=$1
+  _existing_names=${2:-}
   _n=2
-  while security find-generic-password -a "$USER" -s "${_base}-${_n}" >/dev/null 2>&1; do
+  while _contains_word "$_existing_names" "${_base}-${_n}" ||
+        security find-generic-password -a "$USER" -s "${_base}-${_n}" >/dev/null 2>&1; do
     _n=$((_n + 1))
   done
   printf '%s-%d' "$_base" "$_n"
+}
+
+_read_managed_secret() {
+  if [ "$1" -eq 1 ]; then
+    IFS= read -r _rms_secret || _rms_secret=
+    printf '%s' "$_rms_secret"
+  else
+    _prompt_secret "$2"
+  fi
 }
 
 cmd_add_key() {
@@ -119,6 +185,7 @@ cmd_add_key() {
       _surface=main
     fi
     _name=
+    _secret_stdin=0
     while [ $# -gt 0 ]; do
       case $1 in
         --surface) [ $# -ge 2 ] || die "add: --surface needs an argument (plan|api)"
@@ -127,12 +194,14 @@ cmd_add_key() {
         --name)   [ $# -ge 2 ] || die "add: --name needs an argument (keychain service name)"
                   _name=$2; shift 2 ;;
         --name=*) _name=${1#--name=}; shift ;;
-        -h|--help) info "usage: crouter add <provider> [--surface plan|api] [--name <service>]"; return 0 ;;
+        --stdin|--from-stdin) _secret_stdin=1; shift ;;
+        -h|--help) info "usage: crouter add <provider> [--surface plan|api] [--name <service>] [--stdin]"; return 0 ;;
         *) die "add: unknown argument '$1'" ;;
       esac
     done
 
     _var=$(_surface_var "$_surface")
+    _surface=$(_canonical_surface "$_surface")
     _file=$(provider_file "$_p")
 
     if [ "${AUTH_MODE:-}" = surfaces ]; then
@@ -142,41 +211,44 @@ cmd_add_key() {
       esac
     fi
 
-    # Pick the next service name if the user didn't provide one.
+    _existing=$(_key_var_value "$_var")
+    _declared=$(_read_kv "$_file" "$_var")
+    _new_registry=0
+    # Fill the provider's declared Keychain slot before allocating a local
+    # registry name. This makes the common one-key setup a single command.
     if [ -z "$_name" ]; then
-      _name=$(_next_key_name "$_p-$_surface")
+      _name=$(_first_missing_service "$_declared" || true)
+      if [ -z "$_name" ]; then
+        _name=$(_next_key_name "$_p-$_surface" "$_existing")
+        _new_registry=1
+      fi
+    elif ! _contains_word "$_existing" "$_name"; then
+      _new_registry=1
     fi
     _validate_service_name "$_name"
 
-    # Reject duplicates that are already listed in this surface.
-    _existing=$(_read_kv "$_file" "$_var")
-    for _w in $_existing; do
-      [ "$_w" = "$_name" ] && die "service '$_name' is already in $_var (remove it first if you want to re-add)"
-    done
-
-    # Read the secret from the TTY (no echo). Passphrase will not appear in argv or shell history.
-    _secret=$(_prompt_secret "Paste key for $_name: ")
+    # Read from a hidden TTY prompt by default. --stdin supports password
+    # managers and CI without ever putting the value in argv or source files.
+    _secret=$(_read_managed_secret "$_secret_stdin" "Paste key for $_name: ")
     [ -n "$_secret" ] || die "add: empty key; aborting"
 
     # Store in Keychain (add or update).
-    _keychain_put "$_name" "$_secret"
+    _keychain_put "$_name" "$_secret" || die "add: failed to store '$_name' in macOS Keychain"
     unset _secret
 
-    # Append to the selected surface declaration in providers/<provider>.sh.
-    if [ -z "$_existing" ]; then
-      _new="$_name"
-    else
-      _new="$_existing $_name"
-    fi
-    _write_kv "$_file" "$_var" "$_new"
+    [ "$_new_registry" -eq 0 ] || _registry_add "$_p" "$_surface" "$_name"
 
     info "added '$_name' to $_surface surface of provider '$_p'"
-    info "  $_var=$_new   (file: $_file)"
+    if [ "$_new_registry" -eq 1 ]; then
+      info "  registered in $(provider_registry_file "$_p")"
+    else
+      info "  filled built-in Keychain service ($_var)"
+    fi
     info "verify: crouter list $_p"
     return
   fi
 
-  # Single-key providers (keychain / env / dual-source): one Keychain item.
+  # Single-key providers (keychain / env / legacy dual-source): one item.
   _service=$(_single_key_service)
   if [ -z "$_service" ]; then
     case "${AUTH_MODE:-}" in
@@ -188,11 +260,18 @@ cmd_add_key() {
         die "provider '$_p' has no Keychain target for add (set AUTH_KEYCHAIN_FALLBACK / AUTH_REFERENCE / API_KEY_REF)" ;;
     esac
   fi
-  [ $# -eq 0 ] || die "add: '$1' is not valid for a single-key provider (no --surface/--name)"
+  _secret_stdin=0
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --stdin|--from-stdin) _secret_stdin=1; shift ;;
+      -h|--help) info "usage: crouter add <provider> [--stdin]"; return 0 ;;
+      *) die "add: '$1' is not valid for a single-key provider" ;;
+    esac
+  done
 
-  _secret=$(_prompt_secret "Paste key for $_service ($_p): ")
+  _secret=$(_read_managed_secret "$_secret_stdin" "Paste key for $_service ($_p): ")
   [ -n "$_secret" ] || die "add: empty key; aborting"
-  _keychain_put "$_service" "$_secret"
+  _keychain_put "$_service" "$_secret" || die "add: failed to store '$_service' in macOS Keychain"
   unset _secret
 
   info "stored key for '$_p' in Keychain service '$_service'"
@@ -228,9 +307,11 @@ cmd_remove_key() {
     _validate_service_name "$_name"
 
     _var=$(_surface_var "$_surface")
+    _surface=$(_canonical_surface "$_surface")
     _file=$(provider_file "$_p")
 
-    _existing=$(_read_kv "$_file" "$_var")
+    _existing=$(_key_var_value "$_var")
+    _declared=$(_read_kv "$_file" "$_var")
     _found=0
     _new=
     for _w in $_existing; do
@@ -251,8 +332,10 @@ cmd_remove_key() {
       case "$_ans" in y|Y|yes|YES) ;; *) info "aborted"; return 0 ;; esac
     fi
 
-    _write_kv "$_file" "$_var" "$_new"
-    _keychain_delete "$_name"
+    _keychain_delete "$_name" || die "remove: failed to delete '$_name' from macOS Keychain"
+    if ! _contains_word "$_declared" "$_name"; then
+      _registry_remove "$_p" "$_surface" "$_name"
+    fi
 
     info "removed '$_name' from $_surface surface of provider '$_p'"
     return
@@ -278,7 +361,7 @@ cmd_remove_key() {
     case "$_ans" in y|Y|yes|YES) ;; *) info "aborted"; return 0 ;; esac
   fi
 
-  _keychain_delete "$_service"
+  _keychain_delete "$_service" || die "remove: failed to delete '$_service' from macOS Keychain"
   info "removed Keychain item '$_service' for provider '$_p'"
 }
 
@@ -302,7 +385,7 @@ cmd_list_keys_one() {
   _ds=''; is_dual_source && _ds=' (dual-source)'
   printf 'provider: %s   auth_mode: %s%s\n' "$_p" "${AUTH_MODE:-}" "$_ds"
 
-  # Dual-source: preferred "default account" (env) + fallback API key (env/keychain).
+  # Legacy dual-source: preferred env credential + fallback API key.
   if is_dual_source; then
     if [ -n "${DEFAULT_TOKEN_ENV:-}" ]; then
       _dt=$(printenv "$DEFAULT_TOKEN_ENV" 2>/dev/null || true)
@@ -331,7 +414,7 @@ cmd_list_keys_one() {
       if [ "${AUTH_MODE:-}" = surfaces ]; then _surfaces="plan api"; else _surfaces="main plus"; fi
       for _surface in $_surfaces; do
         _var=$(_surface_var "$_surface")
-        _existing=$(_read_kv "$_file" "$_var")
+        _existing=$(_key_var_value "$_var")
         [ -z "$_existing" ] && continue
         printf '%-8s surface (%s):\n' "$_surface" "$_var"
         for _w in $_existing; do
@@ -387,4 +470,5 @@ cmd_list_keys_one() {
       printf '  - (unsupported AUTH_MODE: %s)\n' "${AUTH_MODE:-}"
       ;;
   esac
+  return 0
 }

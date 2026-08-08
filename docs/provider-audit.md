@@ -19,9 +19,13 @@ The audit also applies these rules:
 - Token Plan and pay-as-you-go credentials remain bound to their documented
   URL and auth header.
 - Candidate failover treats 401/402/403/429 as authentication, entitlement, or
-  quota rejection; Baidu Qianfan explicitly uses 403 for expired plans.
+  quota rejection; Baidu Qianfan explicitly uses 403 for expired plans. A
+  failed candidate is cooled down across requests, honoring a longer
+  `Retry-After` value, before it is tried again.
 - Model IDs preserve vendor case, punctuation, and Claude Code annotations.
 - A context limit is configured only when a primary source states it.
+- A vendor's recommended automatic compaction threshold is a separate field;
+  it is never substituted for the model's maximum context.
 - Product-specific MCPs are enabled only from vendor documentation. Packages
   downloaded at session start are pinned to a verified registry version.
 - A provider's MCP/skill configuration is temporary and session-scoped; no
@@ -31,8 +35,20 @@ The audit also applies these rules:
 
 ### Anthropic and native cloud backends
 
+- [Claude Code authentication](https://code.claude.com/docs/en/authentication)
+  documents browser `/login`, stored macOS Keychain credentials, setup tokens,
+  and Anthropic API-key authentication.
+- [Claude Code environment variables](https://code.claude.com/docs/en/env-vars)
+  states that `ANTHROPIC_API_KEY` is sent as `X-Api-Key` and overrides a Claude
+  subscription login when present.
+- [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)
+  keeps Claude.ai subscription OAuth within Anthropic's own products and
+  distinguishes third-party API integrations.
 - [Claude Code model configuration](https://code.claude.com/docs/en/model-config)
   is the basis for the model aliases and context annotation behavior.
+- [Claude model overview](https://platform.claude.com/docs/en/about-claude/models/overview)
+  lists the current Opus 5, Sonnet 5, Fable 5, and Haiku 4.5 model IDs and
+  their different context limits.
 - [Claude Code on Amazon Bedrock](https://code.claude.com/docs/en/amazon-bedrock)
   documents `CLAUDE_CODE_USE_BEDROCK=1` and the AWS credential chain.
 - [Claude Code on Vertex AI](https://code.claude.com/docs/en/google-vertex-ai)
@@ -41,9 +57,17 @@ The audit also applies these rules:
   [plugin reference](https://code.claude.com/docs/en/plugins-reference) define
   `--mcp-config`, `--strict-mcp-config`, and session `--plugin-dir` behavior.
 
-Decision: Bedrock and Vertex use Claude Code's native signers. The previous
-localhost proxy definitions and guessed future/date-suffixed model IDs were
-removed. Native routes are not placed behind `crouter all`.
+Decision: `crouter claude` executes Claude Code without an isolated environment
+or injected provider variables, so its stored `/login` session and optional
+`CLAUDE_CODE_OAUTH_TOKEN` remain owned by Claude Code. `crouter anthropic` is a
+separate Console API-key route using `x-api-key`; neither direct failover nor
+`crouter all` proxies a personal subscription credential. The Anthropic route
+does not inject one global context value because its configured catalog mixes
+1M Opus/Sonnet/Fable with 200K Haiku.
+
+Bedrock and Vertex use Claude Code's native signers. The previous localhost
+proxy definitions and guessed future/date-suffixed model IDs were removed.
+Native routes are not placed behind `crouter all`.
 
 ### MiniMax
 
@@ -72,10 +96,15 @@ activated only when a plan credential is present.
   documents the `https://api.kimi.com/coding/` Anthropic prefix,
   `ANTHROPIC_API_KEY`, 262,144 for the recommended `k3-256k`, and the
   Claude-only `k3[1m]` annotation.
+- [Kimi CLI MCP](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/mcp.html)
+  and [skills](https://www.kimi.com/code/docs/en/kimi-code-cli/customization/skills.html)
+  describe generic Kimi CLI extension mechanisms, not a Kimi-hosted MCP or
+  plan-specific Claude Code plugin.
 
 Decision: `moonshot` represents the Kimi Code membership surface only. The
 Moonshot pay-as-you-go platform is not silently mixed in because its ordinary
-API is a different product contract.
+API is a different product contract. No vendor asset is installed merely from
+generic extension examples.
 
 ### Z.AI
 
@@ -109,11 +138,16 @@ Decision: the local vision package is pinned to
   the recommended workspace-specific domains for each region.
 - [Token Plan quick start](https://help.aliyun.com/en/model-studio/token-plan-personal-quick-start)
   documents that `sk-sp-` plan keys and `sk-` API keys are isolated.
+- [Token Plan multimodal generation](https://help.aliyun.com/en/model-studio/token-plan-multimodal-gen)
+  provides the official image, video, and speech endpoints, auth header, model
+  defaults, and asynchronous video polling contract.
 
 Decision: Token Plan and API candidates share `dashscope`; Coding Plan is a
 separate `dashscope-coding` provider because it has its own URL and catalog.
-The official WebSearch MCP is activated only with the API surface. Set
-`DASHSCOPE_API_URL` to use the recommended workspace-specific prefix.
+The official WebSearch MCP is activated only with the API surface. The Token
+Plan media contract is exposed as a session-only, namespaced skill rather than
+a global setup script. Set `DASHSCOPE_API_URL` to use the recommended
+workspace-specific prefix.
 
 ### DeepSeek
 
@@ -122,9 +156,17 @@ The official WebSearch MCP is activated only with the API surface. Set
   `https://api.deepseek.com/anthropic` prefix, and 1M context.
 - [Anthropic API guide](https://api-docs.deepseek.com/guides/anthropic_api)
   documents `ANTHROPIC_API_KEY` and full `x-api-key` support.
+- [Claude Code integration](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code)
+  recommends `deepseek-v4-pro[1m]` for default, Opus, and Sonnet,
+  `deepseek-v4-flash` for Haiku and subagents, and maximum effort. It also
+  sets the auto-compaction window to 786,432 and documents DeepSeek's
+  server-side web-search tool.
 
-Decision: DeepSeek is API-only and uses `x-api-key`, not Bearer. Opus maps to
-V4 Pro; Sonnet/Haiku/Subagent map to V4 Flash.
+Decision: DeepSeek is API-only and uses `x-api-key`, not Bearer. The public
+default/Opus/Sonnet mapping carries Claude Code's `[1m]` annotation and is
+stripped to raw `deepseek-v4-pro` on the upstream request; Haiku and subagents
+map to V4 Flash. Maximum context and automatic compaction remain separate
+settings. Web search is model-native, not a downloadable MCP package.
 
 ### SiliconFlow
 
@@ -350,3 +392,22 @@ When a vendor changes its plan:
 5. Verify MCP package versions in their official npm/PyPI registry entries.
 6. Run every offline test and a credentialed smoke test only when the account
    owner explicitly provides the required credentials.
+
+## Reproducible local proof
+
+The repository's offline suite verifies provider declarations, exact surface
+binding, model rewriting, header isolation, cross-request cooldown, key-pool
+registration, session asset selection/cleanup, native Claude login passthrough,
+and unified route construction under both POSIX `sh` and `dash`.
+
+```sh
+crouter all --check
+for test_file in test/*.sh; do sh "$test_file"; done
+for test_file in test/*.sh; do dash "$test_file"; done
+```
+
+`all --check` is deliberately non-networked and redacted. These checks prove
+that the implementation matches the recorded contracts; only a credentialed,
+potentially billable request can prove that a particular account currently has
+quota and entitlement to a vendor's live catalog. The check also does not start
+or probe local proxy routes; those dependencies must be running before use.

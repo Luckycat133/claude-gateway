@@ -26,7 +26,7 @@ _crouter_complete() {
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  cmds="all list doctor add remove provider config logs uninstall help --version"
+  cmds="claude all list doctor add remove provider config logs uninstall help --version"
   providers="$(_crouter_providers)"
 
   if [ "$COMP_CWORD" -eq 1 ]; then
@@ -39,6 +39,11 @@ _crouter_complete() {
         # shellcheck disable=SC2207
         COMPREPLY=( $(compgen -W "$providers" -- "$cur") ) ;;
     esac
+    if [ "${COMP_WORDS[1]}" = all ]; then
+      COMPREPLY=( $(compgen -W "--check" -- "$cur") )
+    elif [ "${COMP_WORDS[1]}" = add ]; then
+      COMPREPLY+=( $(compgen -W "--surface plan api --name --stdin" -- "$cur") )
+    fi
   fi
 }
 complete -F _crouter_complete crouter

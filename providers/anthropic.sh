@@ -1,28 +1,26 @@
 #!/bin/sh
-# Provider: Anthropic Claude — subscription OAuth preferred, API key fallback.
+# Provider: Anthropic's official API. Native Claude account login is `crouter claude`.
 PROVIDER_NAME="anthropic"
-PROVIDER_DESC="Anthropic Claude (subscription OAuth preferred, API key fallback)"
+PROVIDER_DESC="Anthropic Claude API (Console API key)"
 
 BASE_URL="https://api.anthropic.com"
 MODEL="claude-sonnet-5"
-CONTEXT_TOKENS="1048576"
+# The catalog mixes 1M Opus/Sonnet/Fable with 200K Haiku. Do not force one
+# global Claude Code compact window across models with different limits.
+CONTEXT_TOKENS=""
 
 MODEL_OPUS="claude-opus-5"
 MODEL_SONNET="claude-sonnet-5"
 MODEL_HAIKU="claude-haiku-4-5"
 MODEL_SUBAGENT="claude-sonnet-5"
+MODEL_ALIASES="claude-fable-5"
 
-EFFORT="max"
+EFFORT=""
 
-DEFAULT_URL="https://api.anthropic.com"
-DEFAULT_AUTH_TYPE="bearer"
-DEFAULT_TOKEN_ENV="CLAUDE_CODE_OAUTH_TOKEN"
-DEFAULT_TOKEN_ENV_FALLBACK="ANTHROPIC_AUTH_TOKEN"
-
-API_URL="https://api.anthropic.com"
-API_AUTH_TYPE="x-api-key"
-API_KEY_ENV="ANTHROPIC_API_KEY"
-API_KEY_REF="anthropic-api-key"
+AUTH_MODE="env"
+AUTH_REFERENCE="ANTHROPIC_API_KEY"
+AUTH_KEYCHAIN_FALLBACK="anthropic-api-key"
+_AUTH_SCHEME="x-api-key"
 
 EXTRA_ENV="CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
 

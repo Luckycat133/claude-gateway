@@ -25,7 +25,8 @@
 #CROUTER_PROVIDER_ASSETS=1
 
 # Ignore user/project MCP definitions while a provider profile is active. This
-# prevents duplicate tool names and credentials crossing between Token Plans.
+# prevents duplicate tool names and credentials crossing between Token Plans;
+# `crouter all` uses a strict empty profile because it cannot hot-swap plugins.
 # Set to 0 to merge the provider profile with existing MCP configuration.
 #CROUTER_STRICT_PROVIDER_MCP=1
 
@@ -45,6 +46,11 @@
 # intentionally excluded from `crouter all`; use a direct provider session for
 # those features. Default: 18799.
 #CROUTER_GATEWAY_PORT=18799
+
+# After a candidate returns 401/402/403/429 or cannot connect, direct and
+# unified proxies avoid it for at least this many milliseconds. A longer
+# upstream Retry-After value wins. Default: 300000 (five minutes).
+#CROUTER_CANDIDATE_COOLDOWN_MS=300000
 
 # Bypass permissions mode. When 1, every `crouter <provider>` launch injects
 # `--dangerously-skip-permissions` so Claude Code skips all permission prompts.

@@ -4,6 +4,38 @@ All notable changes to this local setup are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `crouter claude` preserves Claude Code's native `/login`, stored account, and
+  OAuth environment resolution; `crouter anthropic` remains the separate
+  Anthropic Console API-key route.
+- `crouter all --check` prints a redacted, non-networked proof of every configured
+  route, candidate surface, auth shape, model-map count, and chosen default.
+- User-added Keychain pool entries now live in a mode-600 local registry rather
+  than modifying provider source. `crouter add --stdin` supports password
+  managers and CI; Keychain input uses Apple's trailing `security -w` prompt
+  form so the secret is absent from both crouter and child process arguments.
+  Registry metadata changes only after Keychain confirms an add or delete.
+- Alibaba Model Studio Token Plan sessions include a namespaced skill for the
+  vendor-documented image, video, and speech APIs.
+
+### Changed
+
+- Direct and unified proxies cool down candidates after 401/402/403/429 or
+  connection failure, honor longer `Retry-After` values, and share one auth,
+  header-sanitization, retry, and health implementation.
+- Unified default selection prefers an explicit Anthropic API route, then a
+  credentialed remote route, before unprobed local static/no-auth proxies.
+- DeepSeek now follows its current Claude Code guide: V4 Pro 1M for the default,
+  Opus, and Sonnet tiers; V4 Flash for Haiku and subagents; and a 786,432-token
+  automatic compaction window distinct from the 1M model context.
+- Anthropic subscription OAuth is no longer proxied or included in unified
+  routing. The API provider uses `x-api-key`, and its mixed-context catalog no
+  longer receives an inaccurate global context override.
+- Provider-managed MCPs/plugins remain session-scoped and strict by default;
+  `crouter all` uses a strict empty profile to block stale provider tools, and
+  the redundant global MiniMax auto-setup script was removed.
+
 ## [0.5.0] - 2026-08-08
 
 ### Added

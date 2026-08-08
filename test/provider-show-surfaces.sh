@@ -16,4 +16,7 @@ _native=$($CROUTER provider show bedrock)
 printf '%s\n' "$_native" | grep -q '^auth:        native Claude Code backend$'
 printf '%s\n' "$_native" | grep -q '^  backend:   bedrock$'
 
+_deepseek=$($CROUTER provider show deepseek)
+printf '%s\n' "$_deepseek" | grep -q '^auto compact: 786432 tokens$'
+
 printf 'ok    provider show exposes surfaces, model mappings, assets, and native backends\n'

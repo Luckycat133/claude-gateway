@@ -135,6 +135,7 @@ start_surface_pool() {
   KEYPOOL_AUTH_TOKEN=$(_new_local_proxy_token) || die "failed to generate a local keypool token"
   _out=$(mktemp -t surfacepool.XXXXXX)
   KEYPOOL_CANDIDATES="$_cands" KEYPOOL_PORT=0 KEYPOOL_CLIENT_TOKEN="$KEYPOOL_AUTH_TOKEN" \
+    CROUTER_CANDIDATE_COOLDOWN_MS="${CROUTER_CANDIDATE_COOLDOWN_MS:-300000}" \
     "$NODE_BIN" "$BIN_DIR/keypool-proxy" > "$_out" 2>/dev/null &
   KEYPOOL_PID=$!
 
@@ -184,10 +185,9 @@ surface_state() {
 }
 
 # ---------------------------------------------------------------------------
-# Dual-source providers (currently Anthropic): a preferred "default
-# account" (subscription OAuth or a configured gateway) tried first, with the
-# official API key as fallback. Both surfaces are declared via DEFAULT_*/API_*
-# vars in the provider file.
+# Legacy/custom dual-source providers: one preferred credential/endpoint is
+# tried first, with an API credential as fallback. Both are declared through
+# DEFAULT_*/API_* fields. Official Token Plan providers use AUTH_MODE=surfaces.
 #
 # resolve_dual_source() discovers BOTH surfaces and exports:
 #   _DUAL_DEF_TOKEN / _DUAL_API_TOKEN   raw credentials (may be empty)
@@ -208,7 +208,7 @@ resolve_dual_source() {
   _DUAL_API_TOKEN=""
   _DUAL_COUNT=0
 
-  # Preferred "default account" (subscription OAuth / configured gateway).
+  # Preferred custom/default credential.
   if [ -n "${DEFAULT_TOKEN_ENV:-}" ]; then
     if [ -n "$(printenv "$DEFAULT_TOKEN_ENV" 2>/dev/null)" ]; then
       _DUAL_DEF_TOKEN=$(printenv "$DEFAULT_TOKEN_ENV")
@@ -242,7 +242,7 @@ resolve_dual_source() {
 }
 
 # Front both surfaces with the local failover proxy so that a 401/402/403/429 on the
-# default account rotates to the API key mid-session (no restart needed).
+# preferred credential rotates to the API key mid-session (no restart needed).
 # Requires resolve_dual_source() to have run. No-op unless both are available.
 start_dual_failover() {
   [ "${_DUAL_COUNT:-0}" -ge 2 ] || return 0
@@ -260,6 +260,7 @@ start_dual_failover() {
   KEYPOOL_AUTH_TOKEN=$(_new_local_proxy_token) || die "failed to generate a local keypool token"
   _out=$(mktemp -t dualpool.XXXXXX)
   KEYPOOL_CANDIDATES="$_cands" KEYPOOL_PORT=0 KEYPOOL_CLIENT_TOKEN="$KEYPOOL_AUTH_TOKEN" \
+    CROUTER_CANDIDATE_COOLDOWN_MS="${CROUTER_CANDIDATE_COOLDOWN_MS:-300000}" \
     "$NODE_BIN" "$BIN_DIR/keypool-proxy" > "$_out" 2>/dev/null &
   KEYPOOL_PID=$!
 
@@ -325,6 +326,7 @@ start_keypool() {
   KEYPOOL_AUTH_TOKEN=$(_new_local_proxy_token) || die "failed to generate a local keypool token"
   _out=$(mktemp -t keypool.XXXXXX)
   KEYPOOL_CANDIDATES="$_cands" KEYPOOL_PORT=0 KEYPOOL_CLIENT_TOKEN="$KEYPOOL_AUTH_TOKEN" \
+    CROUTER_CANDIDATE_COOLDOWN_MS="${CROUTER_CANDIDATE_COOLDOWN_MS:-300000}" \
     "$NODE_BIN" "$BIN_DIR/keypool-proxy" > "$_out" 2>/dev/null &
   KEYPOOL_PID=$!
 

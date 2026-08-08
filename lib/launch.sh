@@ -4,7 +4,8 @@
 #   Builds a minimal, terminal-safe "env -i" environment and launches Claude Code
 #   as a child process (so POST_STOP / any local proxy is reaped on exit).
 # Reads these globals at call time: CLAUDE_BIN, EFFORT, EXTRA_ENV, MODEL_*,
-# CONTEXT_TOKENS, AUTH_MODE, AUTH_TOKEN, KEYPOOL_URL, BASE_URL, POST_STOP,
+# CONTEXT_TOKENS, AUTO_COMPACT_TOKENS, AUTH_MODE, AUTH_TOKEN, KEYPOOL_URL,
+# BASE_URL, POST_STOP,
 # and the standard shell vars (LANG, TERM, SHELL, PATH, USER, HOME, COLORTERM).
 
 launch_claude() {
@@ -116,8 +117,10 @@ launch_claude() {
   set -- "ANTHROPIC_DEFAULT_OPUS_MODEL=$MODEL_OPUS" "$@"
   set -- "ANTHROPIC_MODEL=$_main_model" "$@"
   [ -n "$CONTEXT_TOKENS" ] && set -- "CLAUDE_CODE_MAX_CONTEXT_TOKENS=$CONTEXT_TOKENS" "$@"
+  [ -n "${AUTO_COMPACT_TOKENS:-}" ] &&
+    set -- "CLAUDE_CODE_AUTO_COMPACT_WINDOW=$AUTO_COMPACT_TOKENS" "$@"
 
-  # A local proxy (keypool rotation or dual-source failover) owns auth: Claude
+  # A local proxy (surface/keypool rotation or legacy dual-source failover) owns auth: Claude
   # Code just talks to it with a placeholder credential.
   if [ -n "${NATIVE_BACKEND:-}" ]; then
     : # Claude Code's native Bedrock/Vertex integration owns endpoint and auth.
@@ -128,10 +131,9 @@ launch_claude() {
   elif [ "${AUTH_MODE:-}" = "keypool" ] && [ "$_bypass" -eq 0 ]; then
     die "keypool proxy not started"
   elif [ -n "$AUTH_TOKEN" ]; then
-    # Header shape matters. `_AUTH_SCHEME` is set by resolve_dual_source():
-    #   bearer     -> Authorization: Bearer  (Anthropic subscription OAuth,
-    #                 OpenRouter, OpenAI-compatible gateways). Sending such a
-    #                 token as x-api-key gets it rejected upstream.
+    # Header shape matters. `_AUTH_SCHEME` is resolved from the provider:
+    #   bearer     -> Authorization: Bearer. Sending such a token as x-api-key
+    #                 gets it rejected upstream.
     #   x-api-key  -> x-api-key              (Anthropic Console API key)
     # Legacy providers leave it unset: keep the historical both-headers behavior.
     case "${_AUTH_SCHEME:-both}" in
