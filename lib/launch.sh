@@ -17,6 +17,23 @@ launch_claude() {
   # values with spaces survive. Everything is prepended in front of "$@".
   set -- "$CLAUDE_BIN" "$@"
 
+  # Bypass permissions mode. Enable via BYPASS_PERMISSIONS=1 in config.sh (default
+  # off). When on, inject --dangerously-skip-permissions unless the caller already
+  # passed --dangerously-skip-permissions or --permission-mode (avoid duplicates /
+  # conflicts). SECURITY: this disables all permission prompts for the session.
+  if [ "${BYPASS_PERMISSIONS:-0}" = "1" ]; then
+    _has_bypass=0
+    for _arg in "$@"; do
+      case "$_arg" in
+        --dangerously-skip-permissions|--permission-mode) _has_bypass=1; break ;;
+      esac
+    done
+    if [ "$_has_bypass" -eq 0 ]; then
+      _claude_bin="$1"; shift
+      set -- "$_claude_bin" "--dangerously-skip-permissions" "$@"
+    fi
+  fi
+
   # Reasoning effort (Claude Code --effort). Inject the provider default unless
   # the user already passed --effort. Valid levels: low|medium|high|xhigh|max.
   case "${EFFORT:-}" in

@@ -25,3 +25,9 @@
 # automatically via the official uvx method. Set either to 0 to disable.
 #MINIMAX_AUTO_MCP=1
 #MINIMAX_AUTO_SKILL=1
+
+# Bypass permissions mode. When 1, every `crouter <provider>` launch injects
+# `--dangerously-skip-permissions` so Claude Code skips all permission prompts.
+# Default: 0 (off). Set to 1 to enable by default. SECURITY: grants Claude Code
+# unrestricted command execution for the session; only on trusted projects.
+#BYPASS_PERMISSIONS=0
