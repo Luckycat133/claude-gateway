@@ -1,33 +1,34 @@
 #!/bin/sh
-# Provider: StepFun — Anthropic-compatible endpoint with Token Plan.
-# Official: https://platform.stepfun.com/ (step-3.5-flash, step-router, etc.)
-# Token Plan: pay-as-you-go via api.stepfun.com
-# StepFun offers step-3.5-flash (coding), step-router (routing), step-audio (ASR/TTS).
-#
-# Endpoint: https://api.stepfun.com/v1/messages (Anthropic-compatible Messages API)
-# Auth: API key as Bearer token.
-# Uses keypool for Token Plan keys rotation.
+# Step Plan and ordinary API use different Anthropic-compatible prefixes.
 PROVIDER_NAME="stepfun"
-PROVIDER_DESC="StepFun (Token Plan) via native Anthropic-compatible API"
+PROVIDER_DESC="StepFun Step Plan and pay-as-you-go API"
 
-BASE_URL="https://api.stepfun.com/v1/messages"
-MODEL="step-3.5-flash"
-CONTEXT_TOKENS="200000"
+BASE_URL="https://api.stepfun.com/step_plan"
+MODEL="step-3.7-flash"
+CONTEXT_TOKENS="262144"
+MODEL_OPUS="step-3.7-flash"
+MODEL_SONNET="step-3.7-flash"
+MODEL_HAIKU="step-3.7-flash"
+MODEL_SUBAGENT="step-3.7-flash"
+MODEL_ALIASES="step-3.5-flash-2603 step-3.5-flash step-router-v1"
+EFFORT="medium"
 
-# Map Claude Code tiers to StepFun models.
-MODEL_OPUS="step-3.5-flash"
-MODEL_SONNET="step-3.5-flash"
-MODEL_HAIKU="step-3.5-flash"
-MODEL_SUBAGENT="step-3.5-flash"
+AUTH_MODE="surfaces"
+PLAN_URL="https://api.stepfun.com/step_plan"
+PLAN_AUTH_TYPE="bearer"
+PLAN_KEY_ENV="STEPFUN_PLAN_KEY"
+PLAN_KEYS="stepfun-plan"
+PLAN_MODEL="step-3.7-flash"
 
-EFFORT="max"
+API_URL="https://api.stepfun.com"
+API_AUTH_TYPE="bearer"
+API_KEY_ENV="STEPFUN_API_KEY"
+API_KEYS="stepfun-api-key"
+API_MODEL="step-3.7-flash"
 
-# Key pool for Token Plan keys.
-AUTH_MODE="keypool"
-AUTH_KEYS="stepfun-token-1"
-
+ASSET_PROFILE="stepfun"
+ASSET_PLAN_PLUGIN_DIRS="$ROOT_DIR/assets/plugins/stepfun-plan"
 EXTRA_ENV="CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
-
 PRE_START=""
 POST_STOP=""
-HEALTH_CHECK_URL="https://api.stepfun.com/v1/models"
+HEALTH_CHECK_URL=""

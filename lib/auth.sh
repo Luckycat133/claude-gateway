@@ -11,6 +11,10 @@
 # item does not exist, so callers can treat "missing" as "empty".
 kc_get() { security find-generic-password -a "$USER" -s "$1" -w 2>/dev/null; }
 
+_new_local_proxy_token() {
+  "$NODE_BIN" -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))"
+}
+
 # Keychain availability cache (disk-backed): avoids repeating `security` lookups.
 _kc_cache_dir() { printf '%s/.kc-cache' "${LOG_DIR:-$ROOT_DIR/logs}"; }
 _kc_state() {
@@ -50,6 +54,8 @@ resolve_auth() {
       ;;
     none)
       ;;
+    native)
+      ;;
     *)
       die "provider '$PROVIDER_NAME': unsupported AUTH_MODE '$AUTH_MODE'"
       ;;
@@ -57,7 +63,128 @@ resolve_auth() {
 }
 
 # ---------------------------------------------------------------------------
-# Dual-source providers (anthropic/openai/openrouter): a preferred "default
+# Token Plan + pay-as-you-go surfaces. Unlike the legacy keypool contract,
+# credentials are resolved into two distinct pools and converted directly to
+# explicit candidates. There is deliberately no keys x URLs cross product.
+# ---------------------------------------------------------------------------
+resolve_surface_tokens() {
+  _allow_missing=${1:-0}
+  _PLAN_TOKENS=""
+  _API_TOKENS=""
+  _PLAN_FIRST_TOKEN=""
+  _API_FIRST_TOKEN=""
+  _SURFACE_COUNT=0
+
+  if [ -n "${PLAN_KEY_ENV:-}" ]; then
+    _t=$(printenv "$PLAN_KEY_ENV" 2>/dev/null || true)
+    if [ -n "$_t" ]; then
+      _PLAN_TOKENS=$_t
+      _PLAN_FIRST_TOKEN=$_t
+      _SURFACE_COUNT=$((_SURFACE_COUNT + 1))
+    fi
+  fi
+  for _ref in ${PLAN_KEYS:-}; do
+    _t=$(kc_get "$_ref" || true)
+    [ -n "$_t" ] || continue
+    [ -n "$_PLAN_FIRST_TOKEN" ] || _PLAN_FIRST_TOKEN=$_t
+    _PLAN_TOKENS="${_PLAN_TOKENS:+$_PLAN_TOKENS }$_t"
+    _SURFACE_COUNT=$((_SURFACE_COUNT + 1))
+  done
+
+  if [ -n "${API_KEY_ENV:-}" ]; then
+    _t=$(printenv "$API_KEY_ENV" 2>/dev/null || true)
+    if [ -n "$_t" ]; then
+      _API_TOKENS=$_t
+      _API_FIRST_TOKEN=$_t
+      _SURFACE_COUNT=$((_SURFACE_COUNT + 1))
+    fi
+  fi
+  for _ref in ${API_KEYS:-}; do
+    _t=$(kc_get "$_ref" || true)
+    [ -n "$_t" ] || continue
+    [ -n "$_API_FIRST_TOKEN" ] || _API_FIRST_TOKEN=$_t
+    _API_TOKENS="${_API_TOKENS:+$_API_TOKENS }$_t"
+    _SURFACE_COUNT=$((_SURFACE_COUNT + 1))
+  done
+
+  if [ "$_allow_missing" -eq 0 ] && [ "$_SURFACE_COUNT" -eq 0 ]; then
+    die "provider '$PROVIDER_NAME': no Token Plan or API key configured (use crouter add '$PROVIDER_NAME' --surface plan|api)"
+  fi
+}
+
+build_surface_candidates() {
+  CR_MODEL="$MODEL" CR_MODEL_OPUS="$MODEL_OPUS" CR_MODEL_SONNET="$MODEL_SONNET" \
+  CR_MODEL_HAIKU="$MODEL_HAIKU" CR_MODEL_SUBAGENT="$MODEL_SUBAGENT" \
+  CR_PLAN_URL="${PLAN_URL:-}" CR_PLAN_TYPE="${PLAN_AUTH_TYPE:-bearer}" \
+  CR_PLAN_TOKENS="${_PLAN_TOKENS:-}" CR_PLAN_MODEL="${PLAN_MODEL:-}" \
+  CR_PLAN_MODEL_OPUS="${PLAN_MODEL_OPUS:-}" CR_PLAN_MODEL_SONNET="${PLAN_MODEL_SONNET:-}" \
+  CR_PLAN_MODEL_HAIKU="${PLAN_MODEL_HAIKU:-}" CR_PLAN_MODEL_SUBAGENT="${PLAN_MODEL_SUBAGENT:-}" \
+  CR_API_URL="${API_URL:-}" CR_API_TYPE="${API_AUTH_TYPE:-bearer}" \
+  CR_API_TOKENS="${_API_TOKENS:-}" CR_API_MODEL="${API_MODEL:-}" \
+  CR_API_MODEL_OPUS="${API_MODEL_OPUS:-}" CR_API_MODEL_SONNET="${API_MODEL_SONNET:-}" \
+  CR_API_MODEL_HAIKU="${API_MODEL_HAIKU:-}" CR_API_MODEL_SUBAGENT="${API_MODEL_SUBAGENT:-}" \
+    "$NODE_BIN" "$LIB_DIR/route-build.js" surface-candidates
+}
+
+start_surface_pool() {
+  [ -n "$NODE_BIN" ] || die "node not found; surface keypool cannot start"
+  resolve_surface_tokens
+  _cands=$(build_surface_candidates)
+  [ "$_cands" != "[]" ] || die "provider '$PROVIDER_NAME': no usable surface candidates"
+
+  KEYPOOL_AUTH_TOKEN=$(_new_local_proxy_token) || die "failed to generate a local keypool token"
+  _out=$(mktemp -t surfacepool.XXXXXX)
+  KEYPOOL_CANDIDATES="$_cands" KEYPOOL_PORT=0 KEYPOOL_CLIENT_TOKEN="$KEYPOOL_AUTH_TOKEN" \
+    "$NODE_BIN" "$BIN_DIR/keypool-proxy" > "$_out" 2>/dev/null &
+  KEYPOOL_PID=$!
+
+  _lp=""
+  _i=0
+  while [ "$_i" -lt 30 ]; do
+    _lp=$(sed -n 's/^KEYPOOL_LISTENING_PORT=//p' "$_out" 2>/dev/null | head -n 1)
+    [ -n "$_lp" ] && break
+    kill -0 "$KEYPOOL_PID" 2>/dev/null || break
+    sleep 0.1
+    _i=$((_i + 1))
+  done
+  rm -f "$_out"
+  if [ -z "$_lp" ]; then
+    kill "$KEYPOOL_PID" 2>/dev/null || true
+    KEYPOOL_PID=""
+    die "surface keypool failed to start (provider '$PROVIDER_NAME')"
+  fi
+  KEYPOOL_URL="http://127.0.0.1:$_lp"
+  export KEYPOOL_URL KEYPOOL_PID
+  info "auth: Token Plan/API candidates isolated ($_SURFACE_COUNT credential(s), local failover on $KEYPOOL_URL)"
+}
+
+_surface_available() {
+  _env_name=$1
+  _refs=$2
+  if [ -n "$_env_name" ] && [ -n "$(printenv "$_env_name" 2>/dev/null)" ]; then
+    return 0
+  fi
+  for _ref in $_refs; do
+    if security find-generic-password -a "$USER" -s "$_ref" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+surface_state() {
+  _state=""
+  if _surface_available "${PLAN_KEY_ENV:-}" "${PLAN_KEYS:-}"; then
+    _state=plan
+  fi
+  if _surface_available "${API_KEY_ENV:-}" "${API_KEYS:-}"; then
+    _state="${_state:+$_state+}api"
+  fi
+  printf '%s' "$_state"
+}
+
+# ---------------------------------------------------------------------------
+# Dual-source providers (currently Anthropic): a preferred "default
 # account" (subscription OAuth or a configured gateway) tried first, with the
 # official API key as fallback. Both surfaces are declared via DEFAULT_*/API_*
 # vars in the provider file.
@@ -67,9 +194,10 @@ resolve_auth() {
 #   _DUAL_COUNT                         how many surfaces are usable (1 or 2)
 #   AUTH_TOKEN / BASE_URL / _AUTH_SCHEME  the single best surface (direct launch)
 # When both are present, start_dual_failover() fronts them with the local proxy
-# so rotation on 401/429 happens mid-session, exactly like the unified gateway.
+# so rotation on 401/402/403/429 happens mid-session, like the unified gateway.
 # ---------------------------------------------------------------------------
 is_dual_source() {
+  [ "${AUTH_MODE:-}" = surfaces ] && return 1
   [ -n "${DEFAULT_TOKEN_ENV:-}" ] || [ -n "${API_KEY_ENV:-}" ] || [ -n "${API_KEY_REF:-}" ]
 }
 
@@ -113,7 +241,7 @@ resolve_dual_source() {
   die "no auth configured for dual-source provider '$PROVIDER_NAME' (set ${DEFAULT_TOKEN_ENV:-<default token env>} / ${API_KEY_ENV:-<api key env>}, or keychain ${API_KEY_REF:-<none>})"
 }
 
-# Front both surfaces with the local failover proxy so that a 401/429 on the
+# Front both surfaces with the local failover proxy so that a 401/402/403/429 on the
 # default account rotates to the API key mid-session (no restart needed).
 # Requires resolve_dual_source() to have run. No-op unless both are available.
 start_dual_failover() {
@@ -129,8 +257,9 @@ start_dual_failover() {
       "$NODE_BIN" "$LIB_DIR/route-build.js" dual-candidates
   )
 
+  KEYPOOL_AUTH_TOKEN=$(_new_local_proxy_token) || die "failed to generate a local keypool token"
   _out=$(mktemp -t dualpool.XXXXXX)
-  KEYPOOL_CANDIDATES="$_cands" KEYPOOL_PORT=0 \
+  KEYPOOL_CANDIDATES="$_cands" KEYPOOL_PORT=0 KEYPOOL_CLIENT_TOKEN="$KEYPOOL_AUTH_TOKEN" \
     "$NODE_BIN" "$BIN_DIR/keypool-proxy" > "$_out" 2>/dev/null &
   KEYPOOL_PID=$!
 
@@ -151,19 +280,24 @@ start_dual_failover() {
   fi
   KEYPOOL_URL="http://127.0.0.1:$_lp"
   export KEYPOOL_URL KEYPOOL_PID
-  info "auth: default account first, API key on 401/429 (local failover on $KEYPOOL_URL)"
+  info "auth: default account first, API key on 401/402/403/429 (local failover on $KEYPOOL_URL)"
 }
 
 # keypool: resolve a pool of keys from keychain, start a local key-failover proxy,
 # and expose its URL. Claude Code then talks to the proxy, which rotates keys on
-# 429/401 so quota exhaustion is handled transparently (mid-session).
+# 401/402/403/429 so quota exhaustion and entitlement rejection are handled
+# transparently (mid-session).
 #
-# Plus-endpoint ordering: when PLUS_URL + PLUS_KEYS are configured, the plus
-# keys and plus URL are placed FIRST in the proxy's attempt list. All keys share
-# the same upstream account quota — the plus endpoint is just a different
-# URL on the same account (e.g. Coding Plan vs Token Plan). Each key is tried
-# against every declared target in order; the proxy does not treat surfaces
-# as exclusive.
+# Plus-endpoint ordering: PLUS keys stay bound to PLUS_URL and are tried before
+# the main keys bound to BASE_URL. They are never cross-combined.
+build_legacy_keypool_candidates() {
+  CR_PLAN_URL="${PLUS_URL:-}" CR_PLAN_TYPE="${_AUTH_SCHEME:-both}" \
+  CR_PLAN_TOKENS="${_plus_pool:-}" \
+  CR_API_URL="$BASE_URL" CR_API_TYPE="${_AUTH_SCHEME:-both}" \
+  CR_API_TOKENS="${_main_pool:-}" \
+    "$NODE_BIN" "$LIB_DIR/route-build.js" surface-candidates
+}
+
 start_keypool() {
   [ -n "$NODE_BIN" ] || die "node not found; keypool proxy cannot start"
   [ -n "${AUTH_KEYS:-}" ] || die "provider '$PROVIDER_NAME': AUTH_MODE=keypool requires AUTH_KEYS"
@@ -186,17 +320,11 @@ start_keypool() {
   done
   _main_pool=$(echo "$_main_pool" | sed 's/^ *//; s/ *$//')
 
-  # Plus first: plus keys, then main keys. Plus URL first, then main URL.
-  if [ -n "$_plus_pool" ]; then
-    _pool="$_plus_pool $_main_pool"
-    _targets="$PLUS_URL;$BASE_URL"
-  else
-    _pool="$_main_pool"
-    _targets="$BASE_URL"
-  fi
+  _cands=$(build_legacy_keypool_candidates)
 
+  KEYPOOL_AUTH_TOKEN=$(_new_local_proxy_token) || die "failed to generate a local keypool token"
   _out=$(mktemp -t keypool.XXXXXX)
-  KEYPOOL_KEYS="$_pool" KEYPOOL_TARGETS="$_targets" KEYPOOL_PORT=0 \
+  KEYPOOL_CANDIDATES="$_cands" KEYPOOL_PORT=0 KEYPOOL_CLIENT_TOKEN="$KEYPOOL_AUTH_TOKEN" \
     "$NODE_BIN" "$BIN_DIR/keypool-proxy" > "$_out" 2>/dev/null &
   KEYPOOL_PID=$!
 
@@ -215,11 +343,12 @@ start_keypool() {
   fi
   KEYPOOL_URL="http://127.0.0.1:$_lp"
   export KEYPOOL_URL KEYPOOL_PID
-  _nkeys=$(echo "$_pool" | wc -w | tr -d ' ')
-  _ntargets=$(echo "$_targets" | tr ';' '\n' | wc -l | tr -d ' ')
+  _nkeys=$(printf '%s %s\n' "$_plus_pool" "$_main_pool" | wc -w | tr -d ' ')
+  _ntargets=1
+  [ -n "$_plus_pool" ] && _ntargets=2
   _note=""
   if [ "$_ntargets" -gt 1 ]; then
-    _note=" (plus-first: $_ntargets endpoints, $_nkeys keys)"
+    _note=" (plus-first: $_ntargets bound endpoints, $_nkeys keys)"
   else
     _note=" ($_nkeys keys, 1 endpoint)"
   fi
@@ -251,6 +380,10 @@ check_auth() {
     [ -n "$(dual_source_state)" ]
     return $?
   fi
+  if [ "${AUTH_MODE:-}" = surfaces ]; then
+    [ -n "$(surface_state)" ]
+    return $?
+  fi
   case $AUTH_MODE in
     keychain)
       _st=$(_kc_state "$AUTH_REFERENCE")
@@ -275,7 +408,7 @@ check_auth() {
       fi ;;
     command)
       _v=$(eval "$AUTH_REFERENCE" 2>/dev/null) && [ -n "$_v" ] ;;
-    static|none)
+    static|none|native)
       true ;;
     keypool)
       _ok=0

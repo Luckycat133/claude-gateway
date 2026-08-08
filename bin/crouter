@@ -70,7 +70,7 @@ usage() {
 # Modular helpers (sourced after core globals are set). Each lib is a set of
 # POSIX functions that read globals only at call time.
 # ---------------------------------------------------------------------------
-for _mod in provider auth key-mgmt launch; do
+for _mod in provider auth key-mgmt assets launch; do
   . "$LIB_DIR/$_mod.sh"
 done
 
@@ -82,9 +82,6 @@ run_pre_start() {
   [ -n "$PRE_START" ] || return 0
   eval "$PRE_START" || die "PRE_START hook failed for '$PROVIDER_NAME'"
 }
-
-# POST_STOP has no wrapper here on purpose: lib/launch.sh evaluates it directly
-# from its exit trap, which is the only place it can run after Claude Code exits.
 
 # ---------------------------------------------------------------------------
 # Commands
@@ -158,12 +155,33 @@ cmd_run() {
   done
 
   if [ "$_bypass_auth" -eq 0 ]; then
+    # Own lifecycle resources from the first prelaunch hook onward. launch_claude
+    # replaces these traps once it starts the Claude child; until then, any auth
+    # or asset failure must reap a newly started local proxy and partial assets.
+    _crouter_prelaunch_cleanup_done=0
+    _crouter_prelaunch_cleanup() {
+      [ "${_crouter_prelaunch_cleanup_done:-0}" -eq 0 ] || return 0
+      _crouter_prelaunch_cleanup_done=1
+      [ -n "${POST_STOP:-}" ] && eval "$POST_STOP" || true
+      if [ -n "${KEYPOOL_PID:-}" ]; then
+        kill "$KEYPOOL_PID" 2>/dev/null || true
+        wait "$KEYPOOL_PID" 2>/dev/null || true
+      fi
+      cleanup_provider_assets || true
+      return 0
+    }
+    trap '_crouter_prelaunch_cleanup' EXIT
+    trap '_crouter_prelaunch_cleanup; exit 130' INT
+    trap '_crouter_prelaunch_cleanup; exit 143' TERM
+
     run_pre_start
     if is_dual_source; then
       # Preferred "default account" first; when the fallback API key is also
-      # configured, front both with the local proxy so 401/429 rotates live.
+      # configured, front both with the local proxy so 401/402/403/429 rotates live.
       resolve_dual_source
       start_dual_failover
+    elif [ "${AUTH_MODE:-}" = "surfaces" ]; then
+      start_surface_pool
     elif [ "${AUTH_MODE:-}" = "keypool" ]; then
       # Auto-degrade: if AUTH_KEYS has exactly one key and there's no PLUS_KEYS,
       # bypass the keypool-proxy and use the single key directly. Avoids spinning
@@ -180,6 +198,7 @@ cmd_run() {
     else
       resolve_auth
     fi
+    prepare_provider_assets
   fi
 
   launch_claude "$_main_model" "$_bypass_auth" "$@"
@@ -192,6 +211,14 @@ cmd_list() {
       load_provider "$_n"
       if is_dual_source; then
         if [ -n "${DEFAULT_TOKEN_ENV:-}" ]; then _am="dual"; else _am="apikey"; fi
+      elif is_surface_provider; then
+        if [ -n "${PLAN_URL:-}" ] && [ -n "${API_URL:-}" ]; then
+          _am="plan+api"
+        elif [ -n "${PLAN_URL:-}" ]; then
+          _am="plan"
+        else
+          _am="api"
+        fi
       else
         _am="$AUTH_MODE"
       fi
@@ -207,6 +234,7 @@ status_one() {
       _auth=ok
       # Dual-source: surface which credential(s) are live (default / api / both).
       if is_dual_source; then _auth="ok($(dual_source_state))"; fi
+      if is_surface_provider; then _auth="ok($(surface_state))"; fi
     else
       _auth=MISSING
     fi
@@ -286,9 +314,37 @@ cmd_provider_show() {
     printf '  extras:    %s\n' "$MODEL_ALIASES"
   fi
   printf '\n'
-  if is_dual_source; then
+  if is_surface_provider; then
+    printf 'auth:        Token Plan / API key surfaces\n'
+    if [ -n "${PLAN_URL:-}" ]; then
+      printf '  plan URL:  %s\n' "$PLAN_URL"
+      printf '    type:    %s\n' "${PLAN_AUTH_TYPE:-bearer}"
+      printf '    key env: %s\n' "${PLAN_KEY_ENV:-<unset>}"
+      printf '    keychain:%s\n' "${PLAN_KEYS:+ }${PLAN_KEYS:-<none>}"
+      printf '    model:   %s\n' "${PLAN_MODEL:-$MODEL}"
+      printf '    tiers:   opus=%s sonnet=%s haiku=%s subagent=%s\n' \
+        "${PLAN_MODEL_OPUS:-${PLAN_MODEL:-$MODEL_OPUS}}" \
+        "${PLAN_MODEL_SONNET:-${PLAN_MODEL:-$MODEL_SONNET}}" \
+        "${PLAN_MODEL_HAIKU:-${PLAN_MODEL:-$MODEL_HAIKU}}" \
+        "${PLAN_MODEL_SUBAGENT:-${PLAN_MODEL:-$MODEL_SUBAGENT}}"
+    fi
+    if [ -n "${API_URL:-}" ]; then
+      printf '  API URL:   %s\n' "$API_URL"
+      printf '    type:    %s\n' "${API_AUTH_TYPE:-bearer}"
+      printf '    key env: %s\n' "${API_KEY_ENV:-<unset>}"
+      printf '    keychain:%s\n' "${API_KEYS:+ }${API_KEYS:-<none>}"
+      printf '    model:   %s\n' "${API_MODEL:-$MODEL}"
+      printf '    tiers:   opus=%s sonnet=%s haiku=%s subagent=%s\n' \
+        "${API_MODEL_OPUS:-${API_MODEL:-$MODEL_OPUS}}" \
+        "${API_MODEL_SONNET:-${API_MODEL:-$MODEL_SONNET}}" \
+        "${API_MODEL_HAIKU:-${API_MODEL:-$MODEL_HAIKU}}" \
+        "${API_MODEL_SUBAGENT:-${API_MODEL:-$MODEL_SUBAGENT}}"
+    fi
+    printf '  live now:  %s\n' "$(_s=$(surface_state); printf '%s' "${_s:-<none configured>}")"
+    _skip_auth_case=1
+  elif is_dual_source; then
     if [ -n "${DEFAULT_TOKEN_ENV:-}" ]; then
-      printf 'auth:        dual-source (default account first, API key on 401/429)\n'
+      printf 'auth:        dual-source (default account first, API key on 401/402/403/429)\n'
       printf '  default:   %s\n' "${DEFAULT_URL:-$BASE_URL}"
       printf '    type:    %s\n' "${DEFAULT_AUTH_TYPE:-bearer}"
       printf '    token:   $%s%s\n' "$DEFAULT_TOKEN_ENV" \
@@ -304,7 +360,11 @@ cmd_provider_show() {
     _skip_auth_case=1
   else
     _skip_auth_case=0
-    printf 'auth:        %s\n' "$AUTH_MODE"
+    if [ "$AUTH_MODE" = native ]; then
+      printf 'auth:        native Claude Code backend\n'
+    else
+      printf 'auth:        %s\n' "$AUTH_MODE"
+    fi
   fi
   [ "$_skip_auth_case" -eq 1 ] || case "$AUTH_MODE" in
     keychain) printf '  reference: %s\n' "$AUTH_REFERENCE" ;;
@@ -312,6 +372,10 @@ cmd_provider_show() {
     command)  printf '  reference: %s\n' "$AUTH_REFERENCE" ;;
     static)   printf '  reference: %s (literal placeholder)\n' "$AUTH_REFERENCE" ;;
     none)     ;;
+    native)
+      printf '  backend:   %s\n' "${NATIVE_BACKEND:-<unset>}"
+      printf '  passthrough: %s\n' "${PASSTHROUGH_ENV:-<none>}"
+      ;;
     keypool)
       printf '  AUTH_KEYS:      %s\n' "${AUTH_KEYS:-<empty>}"
       if [ -n "${PLUS_URL:-}" ]; then
@@ -320,6 +384,12 @@ cmd_provider_show() {
       fi
       ;;
   esac
+  if [ -n "${ASSET_PROFILE:-}" ] || [ -n "${ASSET_PLUGIN_DIRS:-}${ASSET_PLAN_PLUGIN_DIRS:-}${ASSET_API_PLUGIN_DIRS:-}" ]; then
+    printf '\nassets:      MCP profile %s' "${ASSET_PROFILE:-empty}"
+    [ -n "${ASSET_PLUGIN_DIRS:-}${ASSET_PLAN_PLUGIN_DIRS:-}${ASSET_API_PLUGIN_DIRS:-}" ] && printf ' + session skills'
+    printf '\n'
+    printf '  isolation: session-only%s\n' "$([ "${CROUTER_STRICT_PROVIDER_MCP:-1}" = 1 ] && printf ', strict MCP' || true)"
+  fi
   if [ -n "$EXTRA_ENV" ]; then
     printf '\nextra env:\n'
     _old_ifs=$IFS; IFS='
@@ -440,8 +510,22 @@ cmd_uninstall() {
   fi
 
   for _t in $_targets; do
-    if [ -L "$_dir/$_t" ] || [ -e "$_dir/$_t" ]; then
-      rm -f "$_dir/$_t" && info "removed $_dir/$_t"
+    if [ -L "$_dir/$_t" ]; then
+      case $(readlink "$_dir/$_t" 2>/dev/null) in
+        "$ROOT_DIR/bin/crouter"|"$ROOT_DIR/bin/crouter-compat")
+          rm -f "$_dir/$_t" && info "removed $_dir/$_t" ;;
+        *) info "skipped non-crouter symlink: $_dir/$_t" ;;
+      esac
+    elif [ -e "$_dir/$_t" ]; then
+      info "skipped non-crouter file: $_dir/$_t"
+    fi
+  done
+  for _t in claude-openai claude-baichuan; do
+    if [ -L "$_dir/$_t" ]; then
+      case $(readlink "$_dir/$_t" 2>/dev/null) in
+        "$ROOT_DIR/bin/crouter"|"$ROOT_DIR/bin/crouter-compat")
+          rm -f "$_dir/$_t" && info "removed obsolete $_dir/$_t" ;;
+      esac
     fi
   done
 }
@@ -462,15 +546,31 @@ cmd_uninstall() {
 build_all_routes() {
   _rt=$(mktemp -t call-routes.XXXXXX)
   for _n in $(provider_names); do
-    (
+    if ! (
       load_provider "$_n"
-      # keypool: every key (main + plus) becomes its own candidate, rotated on 401/429.
-      _kpool=""
+      # Native Bedrock/Vertex integrations sign requests inside Claude Code and
+      # cannot be represented by the local HTTP gateway.
+      [ -z "${NATIVE_BACKEND:-}" ] || exit 0
+
+      _surface_candidates=""
+      if is_surface_provider; then
+        resolve_surface_tokens 1
+        _surface_candidates=$(build_surface_candidates) || exit 1
+      fi
+      # Compatibility keypools retain endpoint ownership: PLUS keys never get
+      # paired with BASE_URL and main keys never get paired with PLUS_URL.
       if [ "${AUTH_MODE:-}" = "keypool" ]; then
-        for _ref in ${AUTH_KEYS:-} ${PLUS_KEYS:-}; do
+        _plus_pool=""
+        for _ref in ${PLUS_KEYS:-}; do
           _t=$(kc_get "$_ref")
-          [ -n "$_t" ] && _kpool="$_kpool $_t"
+          [ -n "$_t" ] && _plus_pool="${_plus_pool:+$_plus_pool }$_t"
         done
+        _main_pool=""
+        for _ref in ${AUTH_KEYS:-}; do
+          _t=$(kc_get "$_ref")
+          [ -n "$_t" ] && _main_pool="${_main_pool:+$_main_pool }$_t"
+        done
+        _surface_candidates=$(build_legacy_keypool_candidates) || exit 1
       fi
       # API-surface credential (env var, then keychain service, then legacy AUTH_*).
       _api_key=""
@@ -499,14 +599,13 @@ build_all_routes() {
         _def_token=$(printenv "$DEFAULT_TOKEN_ENV_FALLBACK")
       fi
       # none-mode dummy token(s) from EXTRA_ENV (ollama), split on newline OR ';'.
-      _te=""; _extra=""
+      _te=""
       if [ "${AUTH_MODE:-}" = "none" ]; then
         _ifs="$IFS"; IFS='
 ;'
         for _kv in ${EXTRA_ENV:-}; do
           [ -n "$_kv" ] || continue
           case "$_kv" in ANTHROPIC_AUTH_TOKEN=*) _te=${_kv#ANTHROPIC_AUTH_TOKEN=} ;; esac
-          _extra="$_extra $_kv"
         done
         IFS="$_ifs"
       fi
@@ -517,13 +616,17 @@ build_all_routes() {
         _models="$_models $(ollama list 2>/dev/null | awk 'NR>1{print $1}')"
       fi
 
-      CR_PREFIX="$PROVIDER_NAME" CR_MODELS="$_models" CR_KEYPOOL_KEYS="$_kpool" \
+      CR_PREFIX="$PROVIDER_NAME" CR_MODELS="$_models" CR_KEYPOOL_KEYS="" \
+      CR_SURFACE_CANDIDATES="$_surface_candidates" \
       CR_DEFAULT_URL="${DEFAULT_URL:-$BASE_URL}" CR_DEFAULT_TYPE="${DEFAULT_AUTH_TYPE:-}" CR_DEFAULT_TOKEN="$_def_token" \
       CR_API_URL="${API_URL:-$BASE_URL}" CR_API_TYPE="${API_AUTH_TYPE:-}" CR_API_KEY="$_api_key" \
       CR_AUTH_MODE="${AUTH_MODE:-}" CR_AUTH_SCHEME="${_AUTH_SCHEME:-}" \
-      CR_NONE_TOKEN="$_te" CR_NONE_EXTRA="$_extra" \
+      CR_NONE_TOKEN="$_te" \
         "$NODE_BIN" "$LIB_DIR/route-build.js" candidates
-    ) >> "$_rt"
+    ) >> "$_rt"; then
+      rm -f "$_rt"
+      die "failed to build unified routes for provider '$_n'"
+    fi
   done
   _arr=$(mktemp -t call-routes-arr.XXXXXX)
   "$NODE_BIN" "$LIB_DIR/route-build.js" combine "$_rt" "$_arr"
@@ -539,10 +642,13 @@ cmd_all() {
   [ -n "$NODE_BIN" ] || die "node not found; unified gateway cannot start"
   _gwpid=""
   trap 'kill "${_gwpid:-}" 2>/dev/null' EXIT INT TERM
-  _routes_file=$(build_all_routes)
+  _routes_file=$(build_all_routes) || die "failed to build unified provider routes"
   [ -s "$_routes_file" ] || die "no providers found to build the gateway"
   _out=$(mktemp -t call-gw.XXXXXX)
+  _gateway_token=$("$NODE_BIN" -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))") || \
+    die "failed to generate a local gateway token"
   CROUTER_ROUTES_FILE="$_routes_file" CROUTER_GATEWAY_PORT="${CROUTER_GATEWAY_PORT:-18799}" \
+    CROUTER_GATEWAY_TOKEN="$_gateway_token" \
     "$NODE_BIN" "$BIN_DIR/gateway" > "$_out" 2>/dev/null &
   _gwpid=$!
   _port=""
@@ -569,7 +675,7 @@ cmd_all() {
   AUTH_MODE="none"
   AUTH_TOKEN=""
   CONTEXT_TOKENS=""
-  EXTRA_ENV="ANTHROPIC_AUTH_TOKEN=crouter"
+  EXTRA_ENV="ANTHROPIC_AUTH_TOKEN=$_gateway_token"
   _bypass_auth=0
   launch_claude "$_def" "$_bypass_auth" "$@"
 }
@@ -587,8 +693,8 @@ case $cmd in
     esac
     ;;
   doctor)         cmd_doctor "${1:-}" ;;
-  add)            [ $# -ge 1 ] || die "usage: crouter add <provider> [--surface main|plus] [--name <service>]"; cmd_add_key "$@" ;;
-  remove)         [ $# -ge 1 ] || die "usage: crouter remove <provider> --name <service> [--surface main|plus]"; cmd_remove_key "$@" ;;
+  add)            [ $# -ge 1 ] || die "usage: crouter add <provider> [--surface plan|api] [--name <service>]"; cmd_add_key "$@" ;;
+  remove)         [ $# -ge 1 ] || die "usage: crouter remove <provider> --name <service> [--surface plan|api]"; cmd_remove_key "$@" ;;
   provider)
     # Accept both `crouter provider <name>` and the documented
     # `crouter provider show <name>`.

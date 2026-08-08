@@ -1,38 +1,31 @@
 #!/bin/sh
-# Provider: ByteDance Volcengine (Doubao/Seed) — Anthropic-compatible endpoint with Coding Plan.
-# Official: https://www.volcengine.com/ (Doubao Seed 1.6, Doubao 1.5, DeepSeek)
-# Coding Plan: subscription for AI coding (Doubao-Seed-2.0-Code, DeepSeek, Kimi 2.5)
-# Token Plan: pay-as-you-go via Volcengine ModelArk
-#
-# Endpoint: https://ark.ap-southeast.bytepluses.com/api/v3/messages (Anthropic-compatible)
-# Or region-specific: https://ark.{region}.bytepluses.com/api/v3/messages
-# Auth: Volcengine AccessKey/Secret via Bearer token (ARK_API_KEY).
-# Uses keypool for Coding Plan / Token Plan keys rotation.
+# Volcengine Ark Coding Plan; model IDs retain the documented dots.
 PROVIDER_NAME="volcengine"
-PROVIDER_DESC="ByteDance Volcengine (Doubao/Seed) Coding Plan / Token Plan via Anthropic-compatible API"
+PROVIDER_DESC="Volcengine Ark Coding Plan"
 
-BASE_URL="https://ark.cn-beijing.bytepluses.com/api/v3/messages"
-MODEL="doubao-seed-2-0-code"
-CONTEXT_TOKENS="200000"
+BASE_URL="https://ark.cn-beijing.volces.com/api/coding"
+MODEL="doubao-seed-2.0-code"
+CONTEXT_TOKENS=""
+MODEL_OPUS="doubao-seed-2.0-code"
+MODEL_SONNET="doubao-seed-2.0-code"
+MODEL_HAIKU="doubao-seed-2.0-lite"
+MODEL_SUBAGENT="doubao-seed-2.0-code"
+MODEL_ALIASES="doubao-seed-2.0-pro ark-code-latest"
+EFFORT="high"
 
-# Map Claude Code tiers to Doubao/Seed models.
-MODEL_OPUS="doubao-seed-2-0-code"
-MODEL_SONNET="doubao-seed-2-0-code"
-MODEL_HAIKU="doubao-1-5-lite"
-MODEL_SUBAGENT="doubao-seed-2-0-code"
+AUTH_MODE="surfaces"
+PLAN_URL="https://ark.cn-beijing.volces.com/api/coding"
+PLAN_AUTH_TYPE="bearer"
+PLAN_KEY_ENV="VOLCENGINE_CODING_PLAN_KEY"
+PLAN_KEYS="volcengine-coding-plan"
+PLAN_MODEL="doubao-seed-2.0-code"
+PLAN_MODEL_OPUS="doubao-seed-2.0-code"
+PLAN_MODEL_SONNET="doubao-seed-2.0-code"
+PLAN_MODEL_HAIKU="doubao-seed-2.0-lite"
+PLAN_MODEL_SUBAGENT="doubao-seed-2.0-code"
 
-EFFORT="max"
-
-# Key pool: Coding Plan keys first, then Token Plan keys.
-# Keychain service names: volcengine-coding-1, volcengine-token-1, etc.
-AUTH_MODE="keypool"
-AUTH_KEYS="volcengine-coding-1 volcengine-token-1"
-
-# Optional: region override via config.sh
-# VOLCENGINE_REGION="cn-beijing"  # or ap-southeast, etc.
-
+ASSET_PROFILE="volcengine"
 EXTRA_ENV="CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
-
 PRE_START=""
 POST_STOP=""
-HEALTH_CHECK_URL="https://ark.cn-beijing.bytepluses.com/api/v3/models"
+HEALTH_CHECK_URL=""

@@ -7,21 +7,57 @@ VERSION=$(cat "$ROOT_DIR/VERSION" 2>/dev/null || echo "unknown")
 INSTALL_DIR=${INSTALL_DIR:-$HOME/.local/bin}
 
 mkdir -p "$INSTALL_DIR"
-ln -sf "$ROOT_DIR/bin/crouter" "$INSTALL_DIR/crouter"
-chmod +x "$ROOT_DIR/bin/crouter"
 
 # All compatibility shortcuts are symlinks to the single shared launcher, which
 # derives the provider from the invoked name (strips the "claude-" prefix).
 # The list is derived from providers/ so adding a provider needs no edit here.
-chmod +x "$ROOT_DIR/bin/crouter-compat"
 SHORTCUTS=""
 for f in "$ROOT_DIR"/providers/*.sh; do
   [ -f "$f" ] || continue
   name=$(basename -- "$f" .sh)
-  ln -sf "$ROOT_DIR/bin/crouter-compat" "$INSTALL_DIR/claude-$name"
   SHORTCUTS="$SHORTCUTS claude-$name"
 done
 SHORTCUTS=$(echo "$SHORTCUTS" | sed 's/^ *//')
+
+# Refuse command-name collisions before changing anything. Re-running crouter
+# may replace links from another/moved crouter checkout, but never a regular
+# file or an unrelated symlink.
+_crouter_owned_link() {
+  [ -L "$1" ] || return 1
+  case $(readlink "$1" 2>/dev/null) in
+    */bin/crouter|*/bin/crouter-compat) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+_collisions=""
+for target in crouter $SHORTCUTS; do
+  destination="$INSTALL_DIR/$target"
+  if { [ -e "$destination" ] || [ -L "$destination" ]; } && ! _crouter_owned_link "$destination"; then
+    _collisions="${_collisions}${_collisions:+
+}$destination"
+  fi
+done
+if [ -n "$_collisions" ]; then
+  printf 'crouter: install refused; these paths are not crouter-owned:\n%s\n' "$_collisions" >&2
+  exit 1
+fi
+
+chmod +x "$ROOT_DIR/bin/crouter" "$ROOT_DIR/bin/crouter-compat"
+ln -sf "$ROOT_DIR/bin/crouter" "$INSTALL_DIR/crouter"
+for target in $SHORTCUTS; do
+  ln -sf "$ROOT_DIR/bin/crouter-compat" "$INSTALL_DIR/$target"
+done
+
+# Remove only obsolete crouter-owned compatibility links. OpenAI and Baichuan
+# do not expose an official Anthropic Messages endpoint, so keeping these
+# launchers would advertise a route that cannot work.
+for obsolete in claude-openai claude-baichuan; do
+  if [ -L "$INSTALL_DIR/$obsolete" ]; then
+    case $(readlink "$INSTALL_DIR/$obsolete" 2>/dev/null) in
+      "$ROOT_DIR/bin/crouter"|"$ROOT_DIR/bin/crouter-compat") rm -f "$INSTALL_DIR/$obsolete" ;;
+    esac
+  fi
+done
 
 if [ ! -f "$ROOT_DIR/config.sh" ]; then
   cp "$ROOT_DIR/config.example.sh" "$ROOT_DIR/config.sh"

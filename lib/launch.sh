@@ -17,6 +17,38 @@ launch_claude() {
   # values with spaces survive. Everything is prepended in front of "$@".
   set -- "$CLAUDE_BIN" "$@"
 
+  # A managed profile is session-scoped. Strict MCP mode deliberately ignores
+  # user/project/global MCP definitions for this session, preventing duplicate
+  # tool names or provider credentials from crossing between Token Plans. An
+  # explicit caller-supplied MCP flag wins and disables automatic injection.
+  if [ -n "${PROVIDER_MCP_CONFIG:-}" ]; then
+    _has_mcp_override=0
+    for _arg in "$@"; do
+      case $_arg in --mcp-config|--mcp-config=*|--strict-mcp-config) _has_mcp_override=1; break ;; esac
+    done
+    if [ "$_has_mcp_override" -eq 0 ]; then
+      _claude_bin=$1; shift
+      if [ "${CROUTER_STRICT_PROVIDER_MCP:-1}" = 1 ]; then
+        set -- "$_claude_bin" "--strict-mcp-config" "--mcp-config" "$PROVIDER_MCP_CONFIG" "$@"
+      else
+        set -- "$_claude_bin" "--mcp-config" "$PROVIDER_MCP_CONFIG" "$@"
+      fi
+    else
+      info "warn: explicit Claude MCP flags override crouter profile '$PROVIDER_MCP_CONFIG'"
+    fi
+  fi
+
+  if [ -n "${PROVIDER_PLUGIN_DIRS:-}" ]; then
+    _old_ifs=$IFS
+    IFS='
+'
+    for _plugin_dir in $PROVIDER_PLUGIN_DIRS; do
+      _claude_bin=$1; shift
+      set -- "$_claude_bin" "--plugin-dir" "$_plugin_dir" "$@"
+    done
+    IFS=$_old_ifs
+  fi
+
   # Bypass permissions mode. Enable via BYPASS_PERMISSIONS=1 in config.sh (default
   # off). When on, inject --dangerously-skip-permissions unless the caller already
   # passed --dangerously-skip-permissions or --permission-mode (avoid duplicates /
@@ -25,7 +57,7 @@ launch_claude() {
     _has_bypass=0
     for _arg in "$@"; do
       case "$_arg" in
-        --dangerously-skip-permissions|--permission-mode) _has_bypass=1; break ;;
+        --dangerously-skip-permissions|--permission-mode|--permission-mode=*) _has_bypass=1; break ;;
       esac
     done
     if [ "$_has_bypass" -eq 0 ]; then
@@ -43,7 +75,7 @@ launch_claude() {
   if [ -n "${EFFORT:-}" ]; then
     _has_effort=0
     for _arg in "$@"; do
-      case "$_arg" in --effort) _has_effort=1; break ;; esac
+      case "$_arg" in --effort|--effort=*) _has_effort=1; break ;; esac
     done
     if [ "$_has_effort" -eq 0 ]; then
       _claude_bin="$1"; shift
@@ -60,6 +92,22 @@ launch_claude() {
     done
     IFS=$_old_ifs
   fi
+  if [ -n "${PROVIDER_ASSET_ENV:-}" ]; then
+    _old_ifs=$IFS
+    IFS='
+'
+    for _pair in $PROVIDER_ASSET_ENV; do
+      [ -n "$_pair" ] && set -- "$_pair" "$@"
+    done
+    IFS=$_old_ifs
+  fi
+
+  # Native cloud backends authenticate through their own SDK credential chain.
+  # Preserve only the provider-declared variables from the parent environment.
+  for _pass_name in ${PASSTHROUGH_ENV:-}; do
+    _pass_value=$(printenv "$_pass_name" 2>/dev/null || true)
+    [ -n "$_pass_value" ] && set -- "$_pass_name=$_pass_value" "$@"
+  done
 
   # Model aliases; caller may override any of them per session.
   set -- "CLAUDE_CODE_SUBAGENT_MODEL=$MODEL_SUBAGENT" "$@"
@@ -71,10 +119,12 @@ launch_claude() {
 
   # A local proxy (keypool rotation or dual-source failover) owns auth: Claude
   # Code just talks to it with a placeholder credential.
-  if [ -n "${KEYPOOL_URL:-}" ] && [ "$_bypass" -eq 0 ]; then
+  if [ -n "${NATIVE_BACKEND:-}" ]; then
+    : # Claude Code's native Bedrock/Vertex integration owns endpoint and auth.
+  elif [ -n "${KEYPOOL_URL:-}" ] && [ "$_bypass" -eq 0 ]; then
     set -- "ANTHROPIC_BASE_URL=$KEYPOOL_URL" "$@"
-    set -- "ANTHROPIC_API_KEY=keypool-local" "$@"
-    set -- "ANTHROPIC_AUTH_TOKEN=keypool-local" "$@"
+    set -- "ANTHROPIC_API_KEY=${KEYPOOL_AUTH_TOKEN:-keypool-local}" "$@"
+    set -- "ANTHROPIC_AUTH_TOKEN=${KEYPOOL_AUTH_TOKEN:-keypool-local}" "$@"
   elif [ "${AUTH_MODE:-}" = "keypool" ] && [ "$_bypass" -eq 0 ]; then
     die "keypool proxy not started"
   elif [ -n "$AUTH_TOKEN" ]; then
@@ -94,7 +144,9 @@ launch_claude() {
         set -- "ANTHROPIC_AUTH_TOKEN=$AUTH_TOKEN" "$@" ;;
     esac
   fi
-  set -- "ANTHROPIC_BASE_URL=${KEYPOOL_URL:-$BASE_URL}" "$@"
+  if [ -z "${NATIVE_BACKEND:-}" ]; then
+    set -- "ANTHROPIC_BASE_URL=${KEYPOOL_URL:-$BASE_URL}" "$@"
+  fi
 
   # Minimal, terminal-safe environment. No shell leftovers (NO_COLOR etc.).
   set -- "LANG=${LANG:-en_US.UTF-8}" "$@"
@@ -105,24 +157,49 @@ launch_claude() {
   set -- "USER=$USER" "$@"
   set -- "HOME=$HOME" "$@"
 
-  if [ -n "${KEYPOOL_PID:-}" ] && [ "$_bypass" -eq 0 ]; then
-    # Run as a child (not exec) so we can reap the proxy on exit.
-    env -i "$@" &
-    _cg_pid=$!
-    trap '[ -n "${POST_STOP:-}" ] && eval "$POST_STOP"; kill "$KEYPOOL_PID" 2>/dev/null; kill "$_cg_pid" 2>/dev/null' EXIT INT TERM
-    wait "$_cg_pid"
-    _rc=$?
-    kill "$KEYPOOL_PID" 2>/dev/null
-    exit "${_rc:-0}"
-  fi
+  # Run as a child (not exec) so POST_STOP and any local auth proxy are cleaned
+  # up. Cleanup is idempotent: the signal/EXIT traps and the normal path may all
+  # reach it, but the provider hook runs exactly once and cannot change Claude's
+  # exit status merely because a best-effort kill found an already-dead process.
+  _crouter_cleanup_done=0
+  _crouter_pending_signal=0
+  _cg_pid=""
+  _crouter_launch_cleanup() {
+    [ "${_crouter_cleanup_done:-0}" -eq 0 ] || return 0
+    _crouter_cleanup_done=1
+    [ -n "${POST_STOP:-}" ] && eval "$POST_STOP" || true
+    [ -n "${KEYPOOL_PID:-}" ] && kill "$KEYPOOL_PID" 2>/dev/null || true
+    if command -v cleanup_provider_assets >/dev/null 2>&1; then
+      cleanup_provider_assets || true
+    fi
+    kill "${_cg_pid:-}" 2>/dev/null || true
+    return 0
+  }
 
-  # Run as a child (not exec) so POST_STOP runs on exit and any local proxy
-  # (e.g. Antigravity on 127.0.0.1:18080) is cleaned up instead of leaking.
+  _crouter_launch_signal() {
+    _crouter_pending_signal=$1
+    # If the signal lands while the child is being created, defer the exit
+    # until $! has been captured so the child can still be reaped.
+    [ -n "${_cg_pid:-}" ] || return 0
+    _crouter_launch_cleanup
+    exit "$_crouter_pending_signal"
+  }
+
+  trap '_crouter_launch_cleanup' EXIT
+  trap '_crouter_launch_signal 130' INT
+  trap '_crouter_launch_signal 143' TERM
+
+  [ "$_crouter_pending_signal" -eq 0 ] || exit "$_crouter_pending_signal"
   env -i "$@" &
   _cg_pid=$!
-  trap '[ -n "${POST_STOP:-}" ] && eval "$POST_STOP"; kill "$_cg_pid" 2>/dev/null' EXIT INT TERM
+  if [ "$_crouter_pending_signal" -ne 0 ]; then
+    _pending_signal=$_crouter_pending_signal
+    _crouter_launch_cleanup
+    exit "$_pending_signal"
+  fi
   wait "$_cg_pid"
   _rc=$?
-  [ -n "${POST_STOP:-}" ] && eval "$POST_STOP"
+  trap - EXIT INT TERM
+  _crouter_launch_cleanup
   exit "${_rc:-0}"
 }

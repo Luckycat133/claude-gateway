@@ -19,12 +19,32 @@
 #ANTIGRAVITY_PROXY_DIR="$ROOT_DIR/antigravity-claude-proxy"
 #ANTIGRAVITY_PORT=18080
 
-# MiniMax auto-MCP wiring. When `crouter minimax` starts and a Token Plan key
-# (Keychain service `codex-minimax-token-plan`) is present, two official MCP
-# servers (minimax-coding, minimax-gen) and the multimodal skill are registered
-# automatically via the official uvx method. Set either to 0 to disable.
-#MINIMAX_AUTO_MCP=1
-#MINIMAX_AUTO_SKILL=1
+# Provider-owned MCPs and skills are activated only for the current crouter
+# session; crouter never edits ~/.claude.json or globally installs a plugin.
+# Disable all managed assets with 0. Default: 1.
+#CROUTER_PROVIDER_ASSETS=1
+
+# Ignore user/project MCP definitions while a provider profile is active. This
+# prevents duplicate tool names and credentials crossing between Token Plans.
+# Set to 0 to merge the provider profile with existing MCP configuration.
+#CROUTER_STRICT_PROVIDER_MCP=1
+
+# Tencent's WebSearch MCP URL contains a console-issued identifier and cannot
+# be inferred. Copy the full official URL shown by Tencent Cloud when needed.
+#TENCENT_MCP_URL="https://mcp-api.tencent-cloud.com/sse/REPLACE_ME"
+
+# Qiniu generates one HTTP-Streamable URL per configured MCP service. Put one
+# or more full official URLs here, separated by spaces or newlines.
+#QINIU_MCP_URLS="https://api.qnaigc.com/v1/mcp/http-streamable/REPLACE_ME"
+
+# Alibaba recommends a workspace-specific pay-as-you-go Anthropic prefix. The
+# supported legacy domain is used when this is unset.
+#DASHSCOPE_API_URL="https://WORKSPACE_ID.cn-beijing.maas.aliyuncs.com/apps/anthropic"
+
+# Unified gateway port. Native Bedrock/Vertex routes and provider MCP/skills are
+# intentionally excluded from `crouter all`; use a direct provider session for
+# those features. Default: 18799.
+#CROUTER_GATEWAY_PORT=18799
 
 # Bypass permissions mode. When 1, every `crouter <provider>` launch injects
 # `--dangerously-skip-permissions` so Claude Code skips all permission prompts.

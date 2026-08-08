@@ -1,596 +1,330 @@
 # crouter
 
-A small adapter framework for launching Claude Code against multiple Anthropic-compatible providers from one command. Providers only declare *how to connect*; the single entry point owns *how to launch safely and portably*.
+`crouter` launches Claude Code against audited Anthropic-compatible providers
+without copying provider credentials into this repository. It keeps Token Plan
+keys, pay-as-you-go API keys, endpoints, auth headers, and model mappings as
+separate routing surfaces, then fails over on HTTP 401/402/403/429 without restarting
+the Claude Code session.
 
-No API key is ever stored in this repository. Keys are resolved at launch time from macOS Keychain, environment variables, or a user-supplied command.
-
-## Layout
-
-```text
-crouter/
-├── bin/
-│   └── crouter             # The only entry point
-├── providers/
-│   ├── anthropic.sh               # Anthropic Claude (subscription OAuth -> API key)
-│   ├── openai.sh                  # OpenAI GPT via the Anthropic-compatible Messages API
-│   ├── codex.sh                   # ChatGPT/Codex subscription via icebear0828/codex-proxy
-│   ├── openrouter.sh              # OpenRouter unified gateway
-│   ├── minimax.sh                 # MiniMax M3 (China endpoint)
-│   ├── deepseek.sh                # DeepSeek V4 (Flash/Pro) via /anthropic endpoint
-│   ├── antigravity.sh             # Gemini via local Antigravity proxy
-│   ├── antigravity-claude.sh      # Claude via local Antigravity proxy
-│   ├── ollama.sh                  # Ollama local/cloud models (native Anthropic API)
-│   └── lib/antigravity-common.sh  # Shared gateway lifecycle helpers
-├── config.example.sh              # Copy to config.sh (gitignored)
-├── install.sh                     # Symlink crouter into ~/.local/bin
-├── antigravity-claude-proxy/      # Third-party proxy checkout; NOT committed
-└── logs/                          # Runtime logs; gitignored
-```
+The current provider values were checked against vendor documentation on
+2026-08-08. See [docs/provider-audit.md](docs/provider-audit.md) for the source
+matrix and decisions.
 
 ## Install
 
 ```sh
-./install.sh          # symlinks crouter into ~/.local/bin, creates config.sh
+./install.sh
+crouter list
 ```
 
-> **If you move or rename the repo directory**, the existing symlinks in `~/.local/bin` keep pointing at the old path and break (`command not found`). Re-run `./install.sh` to regenerate them. A stale shell may also cache the old command — run `rehash` (zsh) or open a new terminal.
+The installer creates `crouter` and one `claude-<provider>` compatibility
+shortcut per file in `providers/`. Re-run it after moving the repository or
+adding/removing providers.
 
-For backward compatibility, the installer also provides these equivalent shortcuts:
+Requirements:
 
-```sh
-claude-minimax                # crouter minimax
-claude-antigravity            # crouter antigravity
-claude-antigravity-claude     # crouter antigravity-claude
-claude-deepseek              # crouter deepseek
-claude-codex                 # crouter codex
-claude-ollama                # crouter ollama
-```
+- Claude Code
+- Node.js (for the local keypool and unified gateway)
+- macOS Keychain's `security` command when using Keychain credentials
+- `uvx` only for the MiniMax Token Plan MCP
 
-To use the Antigravity providers, also set up the third-party proxy (see below). MiniMax needs no extra setup beyond the Keychain key. Ollama needs no proxy or key — it serves the Anthropic API locally on port 11434 (see the Ollama section below).
+`config.sh` is optional and gitignored. Copy `config.example.sh` when local
+overrides are needed.
 
 ## Usage
 
-The first bare word after a provider name selects the model (e.g. `crouter ollama qwen3.5:2b`).
-
 ```sh
-crouter list                     # available providers
-crouter minimax                  # Claude Code via MiniMax M3
-crouter antigravity             # Claude Code via Antigravity Gemini
-crouter antigravity-claude       # Claude Code via Antigravity Claude
-crouter deepseek                  # Claude Code via DeepSeek V4 (Flash/Pro)
-crouter ollama                    # Claude Code via Ollama (local/cloud models)
-crouter doctor [provider]        # environment diagnostics
+crouter list
+crouter provider show dashscope
+crouter doctor minimax
+
+crouter minimax
+crouter dashscope qwen3.7-max
+crouter deepseek --model deepseek-v4-pro
+
+crouter add minimax --surface plan
+crouter add minimax --surface api
+crouter list keys minimax
+crouter remove minimax --surface api --name minimax-api-2
 ```
 
-Extra arguments after the provider name are passed straight to Claude Code. Per-session model override — the model may be a bare positional (the first word before any flag) or an explicit flag:
+The first bare argument before any flag is a primary-model override. Remaining
+arguments are forwarded to Claude Code.
 
-```sh
-crouter ollama qwen3.5:2b                        # positional model (short form)
-crouter ollama qwen3.5:2b -p "hi"                # positional model + flags
-crouter antigravity --model gemini-3.1-pro-high # explicit model override
-```
+## Provider catalog
 
-### Unified gateway: `crouter all`
+An empty context means crouter deliberately does not inject a client-side
+limit; the selected vendor model or native backend remains authoritative.
 
-`crouter all` fuses every provider behind one fixed URL. It starts a local
-Anthropic-protocol gateway (a single `ANTHROPIC_BASE_URL`) and launches Claude
-Code against it. The model name carries a `<provider>/` prefix, so you switch
-backends live from inside Claude Code:
+| Provider | Billing surfaces | Default model | Context | Managed assets |
+| --- | --- | --- | ---: | --- |
+| `302ai` | API | `claude-sonnet-5` | 1,000,000 | — |
+| `aihubmix` | API | `coding-glm-5.1-free` | — | API MCP |
+| `anthropic` | subscription OAuth + API | `claude-sonnet-5` | 1,048,576 | — |
+| `antigravity` | local proxy | `gemini-3.1-pro-low` | 1,048,576 | — |
+| `antigravity-claude` | local proxy | `claude-opus-4-6-thinking` | 200,000 | — |
+| `bedrock` | native AWS credentials | `sonnet` alias | — | — |
+| `codex` | local ChatGPT subscription proxy | `gpt-5.6-sol` | 1,050,000 | — |
+| `dashscope` | Token Plan + API | `qwen3.8-max` | 983,616 | API WebSearch MCP |
+| `dashscope-coding` | Coding Plan | `qwen3.7-plus` | — | — |
+| `deepseek` | API | `deepseek-v4-flash` | 1,000,000 | — |
+| `huawei` | Token Plan + API | `glm-5.1` | — | — |
+| `infini` | GenStudio API | `glm-5.1` | — | — |
+| `minimax` | Token Plan + API | `MiniMax-M3` | 1,048,576 | Plan MCP + CLI skill |
+| `moonshot` | Kimi Code membership | `k3-256k` | 262,144 | — |
+| `ollama` | local | `glm-4.7-flash` | 65,536 | — |
+| `openrouter` | API | `openrouter/free` | — | — |
+| `ppio` | API | `minimax/minimax-m3` | 1,000,000 | cloud OAuth MCP |
+| `qianfan` | personal Token Plan + API | `deepseek-v4-pro` | — | — |
+| `qianfan-team` | team Token Plan | `deepseek-v3.2` | — | — |
+| `qianfan-coding` | legacy Coding Plan | `qianfan-code-latest` | — | — |
+| `qiniu` | enterprise subscription + API | `deepseek/deepseek-v3.2-251201` | — | optional managed MCPs |
+| `siliconflow` | API | `Pro/moonshotai/Kimi-K2.6` | — | — |
+| `stepfun` | Step Plan + API | `step-3.7-flash` | 262,144 | StepSearch MCP + skill |
+| `tencent` | personal Token Plan + TokenHub API | `tc-code-latest` | — | optional WebSearch MCP |
+| `tencent-coding` | Coding Plan | `tc-code-latest` | — | — |
+| `vertex` | native Google ADC | `sonnet` alias | — | — |
+| `volcengine` | Ark Coding Plan | `doubao-seed-2.0-code` | — | public docs MCP |
+| `xiaomi` | Token Plan + API | `mimo-v2.5-pro[1m]` | 1,048,576 | — |
+| `z-ai` | Coding Plan + API | `glm-5.2[1m]` | 1,000,000 | vision/search/reader/zread MCPs |
 
-```sh
-crouter all                           # start the unified gateway + Claude Code
-/model ollama/qwen3.5:2b              # inside Claude Code: switch to Ollama
-/model deepseek/deepseek-v4-flash     # or to DeepSeek / MiniMax / Antigravity…
-```
+OpenAI and Baichuan are intentionally absent. Their official APIs do not expose
+an Anthropic Messages base URL that Claude Code can call directly. `codex`
+continues to support a ChatGPT subscription through its explicitly documented
+local translation proxy; crouter does not mislabel OpenAI's normal API as
+Anthropic-compatible.
 
-- `GET /v1/models` on the gateway returns the combined, namespaced catalog, so
-  `/model` can list and switch across providers. For Ollama the catalog is
-  enriched from `ollama list`, so locally-pulled models appear in `/model`.
-- Each request is routed by prefix to the right backend with that backend's own
-  auth (Keychain keys for MiniMax/DeepSeek, the static token for Antigravity,
-  the dummy token for Ollama). Every route holds an ordered list of *candidates*
-  and fails over to the next one on **401/429**, per request: keypool providers
-  list one candidate per key, dual-source providers list the default account
-  first and the API key second.
-- The gateway listens on `127.0.0.1:${CROUTER_GATEWAY_PORT:-18799}` by default;
-  override with `CROUTER_GATEWAY_PORT`. It is reaped automatically when Claude
-  Code exits.
-- The individual per-provider commands (`crouter ollama`, `crouter deepseek`,
-  …) are untouched and still launch directly.
+## Token Plan and API key isolation
 
-> Note: Claude Code's `/model` listing for a custom base URL depends on the
-> Claude Code version; even if the list does not auto-populate, typing the
-> namespaced model (e.g. `/model ollama/qwen3.5:2b`) works.
+Domestic providers use `AUTH_MODE="surfaces"`. Each candidate owns all of the
+following together:
 
-## How it works
+- its Token Plan or API key;
+- its exact base URL;
+- its auth header type (`bearer` or `x-api-key`);
+- its per-tier upstream model map.
 
-The entry point:
+Keys are never multiplied across URLs. For example, DashScope's plan key stays
+on the Token Plan endpoint and maps Opus/Sonnet/Haiku/Subagent to the plan's
+Qwen catalog; an API key stays on the pay-as-you-go endpoint and maps the same
+logical tiers to the API catalog. Explicit models outside that tier map pass
+through unchanged.
 
-1. Resolves its own location through symlinks, so no absolute path is hardcoded anywhere.
-2. Sources `config.sh` (local, gitignored), then the selected `providers/<name>.sh`.
-3. Runs the provider's optional `PRE_START` hook (for Antigravity this auto-starts the local gateway and waits for `/health`).
-4. Resolves the credential according to `AUTH_MODE` — the secret exists only in the launcher process.
-5. Launches Claude Code with `env -i` and a minimal, terminal-safe environment (`HOME`, `PATH`, locale, terminal capabilities), so stray shell variables such as `NO_COLOR` cannot leak in.
-6. Injects endpoint, default model, model aliases (opus/sonnet/haiku/subagent), context window, reasoning effort (`--effort`, from the provider `EFFORT` field), and any provider `EXTRA_ENV`.
+Environment credentials take priority, followed by every Keychain service in
+the provider file:
 
-## Adding a provider
-
-Create `providers/<name>.sh` — no changes to the entry point are needed:
-
-```sh
-PROVIDER_NAME="openrouter"
-BASE_URL="https://openrouter.ai/api"        # Anthropic-compatible endpoint
-MODEL="some/default-model"
-CONTEXT_TOKENS="200000"                     # upstream context_length (tokens) → CLAUDE_CODE_MAX_CONTEXT_TOKENS
-MODEL_OPUS=""                               # optional; default to MODEL
-MODEL_SONNET=""
-MODEL_HAIKU=""
-MODEL_SUBAGENT=""
-AUTH_MODE="keychain"                        # keychain | env | command | static | none | keypool
-AUTH_REFERENCE="my-openrouter-key"          # keychain item / env var name / command
-AUTH_KEYCHAIN_FALLBACK=""                   # optional Keychain service when AUTH_MODE=env and env var unset
-EXTRA_ENV=""                                # one KEY=VALUE per line
-EFFORT=""                                   # reasoning effort: low|medium|high|xhigh|max (-> claude --effort)
-PRE_START=""                                # optional lifecycle hooks
-POST_STOP=""
-HEALTH_CHECK_URL=""                         # used by status/doctor
-```
-
-| Mode | `AUTH_REFERENCE` means | Example |
+| Provider | Plan environment variable | API environment variable |
 | --- | --- | --- |
-| `keychain` | macOS Keychain generic-password service name | `codex-minimax-token-plan` |
-| `env` | Env var name; if unset, tries `AUTH_KEYCHAIN_FALLBACK` Keychain item | `OPENROUTER_API_KEY` |
-| `command` | Command whose stdout is the token | `pass show openrouter` |
-| `static` | Literal (non-secret) token | `local-antigravity-proxy` |
-| `none` | No credential injected | |
-| `keypool` | Space-separated Keychain services (`AUTH_KEYS`); local proxy rotates on 429/401 | `codex-minimax-token-plan` |
+| `302ai` | — | `AI302_API_KEY` |
+| `aihubmix` | — | `AIHUBMIX_API_KEY` |
+| `minimax` | `MINIMAX_TOKEN_PLAN_KEY` | `MINIMAX_API_KEY` |
+| `moonshot` | `KIMI_CODE_KEY` | — |
+| `z-ai` | `Z_AI_CODING_PLAN_KEY` | `Z_AI_API_KEY` |
+| `dashscope` | `DASHSCOPE_TOKEN_PLAN_KEY` | `DASHSCOPE_API_KEY` |
+| `dashscope-coding` | `DASHSCOPE_CODING_PLAN_KEY` | — |
+| `deepseek` | — | `DEEPSEEK_API_KEY` |
+| `stepfun` | `STEPFUN_PLAN_KEY` | `STEPFUN_API_KEY` |
+| `volcengine` | `VOLCENGINE_CODING_PLAN_KEY` | — |
+| `tencent` | `TENCENT_TOKEN_PLAN_KEY` | `TENCENT_API_KEY` |
+| `tencent-coding` | `TENCENT_CODING_PLAN_KEY` | — |
+| `qianfan` | `QIANFAN_TOKEN_PLAN_KEY` | `QIANFAN_API_KEY` |
+| `qianfan-team` | `QIANFAN_TEAM_TOKEN_PLAN_KEY` | — |
+| `qianfan-coding` | `QIANFAN_CODING_PLAN_KEY` | — |
+| `qiniu` | `QINIU_SUBSCRIPTION_KEY` | `QINIU_API_KEY` |
+| `siliconflow` | — | `SILICONFLOW_API_KEY` |
+| `huawei` | `HUAWEI_TOKEN_PLAN_KEY` | `HUAWEI_API_KEY` |
+| `infini` | — | `INFINI_API_KEY` |
+| `ppio` | — | `PPIO_API_KEY` |
+| `xiaomi` | `XIAOMI_TOKEN_PLAN_KEY` | `XIAOMI_API_KEY` |
 
-`CONTEXT_TOKENS` → injected as `CLAUDE_CODE_MAX_CONTEXT_TOKENS`; should match upstream `context_length`. Omitted = not injected (Claude Code default).
+Use `crouter provider show <name>` to inspect the URL, auth type, Keychain
+service names, and tier maps without revealing secrets.
 
-`anthropic` declares two credential surfaces: crouter spends the **default
-account's included quota first**, falling back to the metered API key on
-**401/429**. `openrouter` instead uses `AUTH_MODE="env"`: it reads
-`OPENROUTER_API_KEY` first and then the `openrouter-api-key` Keychain item.
-`openai` uses `AUTH_MODE="keychain"` with the `openai-api-key` item.
+### Failover behavior
 
-The Anthropic dual-source contract is:
+Direct launches start a localhost-only proxy for surface providers. It tries
+credentials in declaration order and advances on 401/402/403/429 or connection
+failure. HTTP 403 is included because some plans report expired or missing
+entitlements with that status.
+The proxy rewrites only known logical tier models for the active surface and
+preserves other model IDs. It is stopped when Claude Code exits.
+
+The older `AUTH_MODE="keypool"` contract remains supported for custom provider
+files. Its `PLUS_KEYS` are bound only to `PLUS_URL`; they are no longer combined
+with every declared URL.
+
+For DashScope pay-as-you-go, the legacy public domain remains supported. Alibaba
+now recommends a workspace-specific prefix; set the complete value, such as
+`https://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/apps/anthropic`, in
+`DASHSCOPE_API_URL`.
+
+Baidu stopped new Coding Plan sales on 2026-07-13. New personal subscriptions
+use `qianfan`; enterprise/team subscriptions use `qianfan-team`. The separate
+`qianfan-coding` provider remains only for an existing Coding Plan subscription
+until its service period ends, so its dedicated key never reaches a Token Plan
+or pay-as-you-go endpoint.
+
+Qiniu subscription keys (`sk-plan`) and ordinary API keys use the same host but
+remain separate candidates and Keychain pools. To activate MCP services created
+in the Qiniu console, set one or more official HTTP-Streamable addresses in
+`QINIU_MCP_URLS`; crouter rejects other hosts and injects only the active Qiniu
+credential into the temporary session profile.
+
+InfiniAI's Coding Plan was shut down on 2026-06-26. The `infini` provider is
+therefore API-only and does not accept obsolete `sk-cp-` plan credentials.
+
+## Provider MCPs and skills
+
+Managed assets are session-scoped. crouter renders a mode-600 temporary MCP
+configuration, supplies it with `--mcp-config`, loads provider skills with
+`--plugin-dir`, and deletes the temporary file at session exit. It never edits
+`~/.claude.json`, runs `claude mcp add`, or globally installs a plugin.
+
+By default, `--strict-mcp-config` suppresses user/project MCP definitions for a
+managed provider session. This prevents an old provider's tools or credentials
+from remaining active after switching plans. crouter-owned plugin names and
+skills are namespaced, so provider skills do not collide. Set
+`CROUTER_STRICT_PROVIDER_MCP=0` to merge existing MCPs, or
+`CROUTER_PROVIDER_ASSETS=0` to disable all managed assets.
+
+Current profiles:
+
+- MiniMax plan: `minimax-coding-plan-mcp==0.0.4` through `uvx`, plus the
+  session-only `minimax-cli` skill using `mmx-cli@1.0.19`.
+- Z.AI: `@z_ai/mcp-server@0.1.4` vision plus the official remote web search,
+  web reader, and zread MCP endpoints.
+- DashScope API: official Model Studio WebSearch MCP. It is omitted when only a
+  Token Plan credential is available because that MCP requires the API key.
+- Step Plan: official StepSearch (`web_search` and `web_fetch`) and a matching
+  session skill.
+- Volcengine: public Ark documentation MCP.
+- Tencent: optional console-issued WebSearch SSE URL. Set the complete
+  `TENCENT_MCP_URL`; crouter refuses non-HTTPS or non-Tencent hosts.
+- AIHubMix: official API MCP, authenticated with only the active AIHubMix API
+  surface credential.
+- PPIO: official cloud-management MCP. It uses its own OAuth 2.1 flow rather
+  than copying the LLM API key into the MCP profile.
+
+Vendors without a documented plan MCP get an intentionally empty strict
+profile. crouter does not invent or install unofficial MCP packages.
+
+Switch providers by starting the matching direct session, for example
+`crouter minimax` then later `crouter stepfun`. A running Claude Code process
+cannot replace its plugin set dynamically.
+
+## Unified gateway
 
 ```sh
-# --- preferred "default account" (tried FIRST) ---
-DEFAULT_URL="https://api.anthropic.com"
-DEFAULT_AUTH_TYPE="bearer"                  # sent as Authorization: Bearer
-DEFAULT_TOKEN_ENV="CLAUDE_CODE_OAUTH_TOKEN"
-DEFAULT_TOKEN_ENV_FALLBACK="ANTHROPIC_AUTH_TOKEN"   # optional second env name
-
-# --- fallback API surface ---
-API_URL="https://api.anthropic.com"
-API_AUTH_TYPE="x-api-key"                   # sent as x-api-key
-API_KEY_ENV="ANTHROPIC_API_KEY"
-API_KEY_REF="anthropic-api-key"             # optional macOS Keychain service
+crouter all
+/model deepseek/deepseek-v4-pro
+/model dashscope/qwen3.7-max
 ```
 
-The two surfaces may use **different URLs and different header shapes**. This
-matters: an Anthropic subscription OAuth token is only valid as
-`Authorization: Bearer` — sending it as `x-api-key` gets it rejected. crouter
-never sends both headers for a dual-source provider.
+`crouter all` exposes a namespaced `/v1/models` catalog on
+`127.0.0.1:${CROUTER_GATEWAY_PORT:-18799}` and uses the same bound candidates
+and per-surface model maps. Its paid `/v1/messages` route requires a random
+per-session local token. Native Bedrock/Vertex routes are excluded because their
+SDK signers live inside Claude Code.
 
-Rotation is real, not just a start-up choice:
+The unified gateway switches model traffic only. Provider MCPs and skills are
+fixed when a Claude Code process starts, so use `crouter <provider>` when those
+assets or a native cloud backend are needed.
 
-* **`crouter <provider>`** — when both surfaces are configured, crouter fronts
-  them with `bin/keypool-proxy` (candidate mode) and points Claude Code at it,
-  so a 401/429 rotates to the API key **mid-session**. With only one surface
-  configured it connects directly, with no proxy overhead.
-* **`crouter all`** — each surface becomes a candidate on that provider's route
-  and the unified gateway fails over per request.
+## Native Bedrock and Vertex
 
-`crouter list` shows `dual` (both surfaces declared) or `apikey` (single
-surface); `crouter doctor` reports which credentials are actually live, e.g.
-`auth:ok(default+api)`.
-
-## Key pool & automatic failover
-
-Some providers let you hold several API keys (e.g. multiple MiniMax plans, or a
-pay-as-you-go key plus a Coding Plan). Set `AUTH_MODE="keypool"` and list the
-Keychain service names in `AUTH_KEYS` (space-separated). At launch the gateway
-resolves every key, starts a tiny local proxy (`bin/keypool-proxy`), and points
-Claude Code at the proxy instead of the real endpoint.
-
-The proxy forwards each request and, on a quota/rate-limit error (HTTP **429**)
-or an auth error (**401**), transparently retries with the next key — including
-**mid-session, with no interruption** to the running Claude Code session. When all
-keys on a surface are exhausted it falls through to the next surface (if
-configured), otherwise it returns the upstream error.
-
-### MiniMax example
-
-`providers/minimax.sh` ships in keypool mode:
+`bedrock` and `vertex` use Claude Code's supported native integrations. crouter
+does not start a third-party localhost proxy or guess date-suffixed cloud model
+IDs.
 
 ```sh
-AUTH_MODE="keypool"
-AUTH_KEYS="codex-minimax-token-plan"   # append more Keychain service names here
-# Optional second surface (MiniMax Coding Plan). Its endpoint and supported
-# models differ from the Token Plan; fill these once you have the key(s):
-# PLUS_URL="https://.../anthropic"
-# PLUS_KEYS="minimax-coding-1 minimax-coding-2"
-```
+AWS_PROFILE=my-profile AWS_REGION=us-east-1 crouter bedrock
 
-Add a key (no shell-history exposure):
-
-```sh
-read -s "K?Paste MiniMax key: "; echo
-security add-generic-password -U -a "$USER" -s "minimax-2" -w "$K"; unset K
-```
-
-then append `minimax-2` to `AUTH_KEYS`. The proxy tries every key on the API
-surface first, then every key on the Coding Plan surface.
-
-Notes:
-- The local proxy listens on `127.0.0.1` only and is torn down when the session ends.
-- `keypool` is provider-agnostic; any provider can opt in via `AUTH_MODE="keypool"` + `AUTH_KEYS`.
-
-## Manage keys from the command line
-
-The gateway ships three subcommands that mutate a keypool provider's
-`AUTH_KEYS` / `PLUS_KEYS` list and the corresponding macOS Keychain
-entries, so you never need to hand-edit `providers/<name>.sh` or paste
-keys on the command line (where they'd land in shell history).
-
-```sh
-crouter add <provider>                       # add a key (auto-named)
-crouter add <provider> --name my-key-3       # add with explicit Keychain service name
-crouter add <provider> --surface plus      # add to the PLUS_KEYS surface instead
-crouter remove <provider> --name my-key-2    # remove from the keypool (asks for confirmation)
-crouter remove <provider> --name my-key-2 -y # skip confirmation
-crouter list keys <provider>                 # show what's registered, plus Keychain presence
-```
-
-`add` reads the secret from `/dev/tty` with no echo, so the key never
-appears in `argv` or your shell history. `rotate` requires the name to
-already be listed (use `add` to register a new key). `list keys` prints
-both surfaces of a keypool provider, or a single-key summary for any
-other `AUTH_MODE`. The provider must be in `AUTH_MODE="keypool"` for
-`add` / `rotate` / `remove`; the gateway refuses otherwise.
-
-## Providers
-
-### Anthropic Claude
-
-Endpoint `https://api.anthropic.com`, default `claude-sonnet-5`, 200k context.
-This is a [dual-source provider](#dual-source-providers-default-account-first-api-key-as-fallback):
-your **Claude subscription (Pro/Max) OAuth token is spent first**, and the
-metered Console API key only takes over on 401/429.
-
-```sh
-# 1) Default account — subscription quota (preferred).
-#    `claude setup-token` mints a long-lived OAuth token for your logged-in plan.
-export CLAUDE_CODE_OAUTH_TOKEN="$(claude setup-token)"   # or reuse ANTHROPIC_AUTH_TOKEN
-
-# 2) Fallback — Console API key, billed per token. Keychain keeps it out of your rc file.
-read -s "ANTHROPIC_KEY?Paste Anthropic API key: "; echo
-security add-generic-password -U -a "$USER" -s "anthropic-api-key" -w "$ANTHROPIC_KEY"
-unset ANTHROPIC_KEY
-
-crouter doctor anthropic     # -> anthropic  auth:ok(default+api)
-crouter anthropic
-```
-
-| Claude Code selection | Model |
-| --- | --- |
-| Default, `/model sonnet`, subagents | `claude-sonnet-5` |
-| `/model opus` | `claude-opus-5` |
-| `/model haiku` | `claude-haiku-4-5` |
-
-Configure only one of the two and crouter connects directly to it — the failover
-proxy is only started when both are present.
-
-### OpenAI GPT
-
-Endpoint prefix `https://api.openai.com` — Claude Code appends `/v1/messages`
-when it calls OpenAI's Anthropic-compatible Messages API. Claude Code therefore
-talks to GPT natively (Bearer API key; it does NOT use Anthropic's `x-api-key`
-header). Single credential surface; auth is one API key in Keychain.
-
-```sh
-read -s "OPENAI_KEY?Paste OpenAI API key: "; echo
-security add-generic-password -U -a "$USER" -s "openai-api-key" -w "$OPENAI_KEY"
-unset OPENAI_KEY
-
-crouter openai
-```
-
-Configured models are `gpt-5.6-sol` (frontier tier), `gpt-5.6-terra`
-(balanced, default), and `gpt-5.6-luna` (efficient tier), all with a 1.05M-token
-context window. Reasoning effort defaults to `high`; OpenAI's compatibility
-endpoint maps Claude Code's thinking budget to its own reasoning effort.
-
-### Codex (ChatGPT/Codex subscription)
-
-This provider uses icebear0828/codex-proxy on port 19000. The proxy translates
-the Anthropic Messages API to Codex and authenticates the ChatGPT account with
-OAuth PKCE. Install it and complete the initial login first:
-
-```sh
-crouter codex                # default: gpt-5.6-sol
-crouter codex gpt-5.6-terra  # override the model for this session
-```
-
-The available catalog is fetched dynamically from `GET /v1/models/catalog` and
-depends on the account and plan. The configured tiers are Opus = `gpt-5.6-sol`,
-Sonnet = `gpt-5.6-terra`, and Haiku/Subagent = `gpt-5.6-luna`, all with a
-1,050,000-token context window. Select another catalog model with
-`crouter codex <model>` or the in-session `/model` command. In `crouter all`
-mode, keep the proxy running because `PRE_START` is not run.
-
-### OpenRouter
-
-Endpoint `https://openrouter.ai/api` (deliberately **no** trailing `/v1` — Claude
-Code appends `/v1/messages` itself, so the provider must omit it or the request
-becomes `.../api/v1/v1/messages` and 404s).
-
-The default model is `openrouter/free`, OpenRouter's Free Models Router, with an
-advertised 200,000-token context window. It selects from currently available
-free models and filters them for requested capabilities. Free model availability
-and rate limits can change, so a compatible route is not always guaranteed.
-
-The provider uses a single Bearer-auth surface. It reads the key from
-`$OPENROUTER_API_KEY`, falling back to the Keychain item `openrouter-api-key`,
-so `crouter list` reports `env`, never `dual`.
-
-```sh
-# Either export the key ...
-export OPENROUTER_API_KEY="sk-or-..."
-# ... or store it in the Keychain (checked when the env var is unset):
-read -s "OPENROUTER_KEY?Paste OpenRouter API key: "; echo
-security add-generic-password -U -a "$USER" -s "openrouter-api-key" -w "$OPENROUTER_KEY"
-unset OPENROUTER_KEY
-
-crouter openrouter
-```
-
-The provider sets `ANTHROPIC_API_KEY=` (empty) in `EXTRA_ENV`, as OpenRouter's
-Claude Code integration guide requires — a leftover Anthropic key otherwise
-conflicts with the OpenRouter token. Model IDs keep their vendor prefix, so under
-`crouter all` the default reads `openrouter/openrouter/free` (the gateway only
-strips the first path segment).
-
-### MiniMax Token Plan
-
-China endpoint `https://api.minimaxi.com/anthropic`, default `MiniMax-M3`, 1,048,576-token input context. It runs in `AUTH_MODE="keypool"`: the Keychain item `codex-minimax-token-plan` is the first entry in `AUTH_KEYS`, and you can add more keys, or a separate Coding Plan surface via `PLUS_URL`/`PLUS_KEYS` — see [Key pool & automatic failover](#key-pool--automatic-failover). To set or rotate a key without shell-history exposure:
-
-```sh
-read -s "MINIMAX_TOKEN_PLAN_KEY?Paste MiniMax Token Plan Key: "
-echo
-security add-generic-password -U -a "$USER" -s "codex-minimax-token-plan" -w "$MINIMAX_TOKEN_PLAN_KEY"
-unset MINIMAX_TOKEN_PLAN_KEY
-```
-
-#### MiniMax MCP tools (auto-wired)
-
-Launching `crouter minimax` automatically wires up MiniMax's MCP servers and the
-multimodal skill **when a Token Plan key (`codex-minimax-token-plan` in Keychain)
-is present** — no manual `claude mcp add` needed:
-
-- `minimax-coding` (`MiniMax-Coding-Plan-MCP`): `web_search` + `understand_image`
-- `minimax-gen` (`MiniMax-MCP`): `text_to_image` / `generate_video` / `music_generation`
-  / `voice_clone` / `voice_design` …
-- `minimax-multimodal-toolkit` skill (official `MiniMax-AI/skills`, backed by `mmx-cli`)
-
-The wiring uses the official methods and is idempotent — already-registered
-servers / installed skills are skipped. The two MCP servers use the official `uvx`
-install method (pinned to `mcp==1.9.4`, because MiniMax's packages import the
-removed `mcp.server.fastmcp` path under mcp 2.x); the skill uses the official Claude
-Code plugin method (`claude plugin marketplace add https://github.com/MiniMax-AI/skills`
-+ `claude plugin install minimax-skills`, global/user scope — not project-level).
-All three are registered globally (`claude mcp add -s user`, `~/.claude` plugins),
-never project-scoped. The tools share the `coding_plan` quota with the model
-endpoint, so a working Token Plan key is required.
-
-**Turn it off.** Copy `config.example.sh` to `config.sh` and set:
-
-```sh
-MINIMAX_AUTO_MCP=0   # disable both MCP servers + the skill
-# or keep the MCP servers but skip the skill clone:
-MINIMAX_AUTO_SKILL=0
-```
-
-`claude mcp list` should then show `minimax-coding … ✔ Connected` and
-`minimax-gen … ✔ Connected`.
-
-### DeepSeek V4
-
-Anthropic-compatible endpoint `https://api.deepseek.com/anthropic`, default `deepseek-v4-flash`, 1,000,000-token context. The key is read from the Keychain item `deepseek-api-key`. To set or rotate it without shell-history exposure:
-
-```sh
-read -s "DEEPSEEK_KEY?Paste DeepSeek API key: "
-echo
-security add-generic-password -U -a "$USER" -s "deepseek-api-key" -w "$DEEPSEEK_KEY"
-unset DEEPSEEK_KEY
-```
-
-Model mapping (1M context):
-
-| Claude Code selection | DeepSeek model |
-| --- | --- |
-| Default | `deepseek-v4-flash` |
-| `/model opus` | `deepseek-v4-pro` |
-| `/model sonnet`, `/model haiku`, subagents | `deepseek-v4-flash` |
-
-### Antigravity (Gemini / Claude)
-
-Both providers talk to a local proxy bound to `127.0.0.1:18080`. The proxy is the third-party open-source project [antigravity-claude-proxy](https://github.com/badrisnarayanan/antigravity-claude-proxy) (MIT). Its source is **not** committed to this repository — set it up once:
-
-```sh
-# From the repository root (or anywhere; see ANTIGRAVITY_PROXY_DIR below)
-git clone https://github.com/badrisnarayanan/antigravity-claude-proxy.git
-cd antigravity-claude-proxy
-npm install
-```
-
-If you clone it somewhere else or change the port, point the framework at it in `config.sh`:
-
-```sh
-ANTIGRAVITY_PROXY_DIR="$HOME/src/antigravity-claude-proxy"
-ANTIGRAVITY_PORT=18080
-```
-
-The proxy signs in with a Google account on first run — follow its own README for account setup. Keep it updated with `git pull && npm install`.
-
-Launching either Antigravity provider auto-starts the gateway if it is not running (`PRE_START` hook waits for `/health`).
-
-Gemini mapping (1M context):
-
-| Claude Code selection | Antigravity model |
-| --- | --- |
-| Default | `gemini-3.1-pro-low` |
-| `/model opus` | `gemini-3.1-pro-low` |
-| `/model sonnet` | `gemini-3.5-flash-low` |
-| `/model haiku` | `gemini-3.5-flash-low` |
-| subagents | `gemini-3.5-flash-low` |
-
-Additional Antigravity Gemini models (select explicitly via `crouter antigravity --model <name>`): `gemini-3.1-pro-high`, `gemini-3-flash`. See `crouter provider show antigravity` for the configured list.
-
-Claude mapping (200K context): default and `/model opus` → `claude-opus-4-6-thinking`; `/model sonnet`, `/model haiku`, and subagents → `claude-sonnet-4-6`.
-
-Additional Antigravity models registered under `MODEL_ALIASES` (select explicitly via `--model`): `gpt-oss-120b-medium` on `antigravity-claude`. See `crouter provider show <provider>` for the live list.
-
-#### GPT-OSS support (requires a one-line proxy patch)
-
-The proxy's `getModelFamily()` only recognises the `claude` and `gemini` substrings; any other name — including `gpt-oss-120b-medium` — is rejected by `isValidModel()` with `invalid_request_error: Invalid model: gpt-oss-120b-medium`. Until the patch lands upstream, `crouter` ships a local patcher that applies the same change idempotently:
-
-```sh
-# Auto-detects $ROOT_DIR/antigravity-claude-proxy; honors $ANTIGRAVITY_PROXY_DIR.
-crouter antigravity-proxy-patch              # apply (no-op if already applied)
-crouter antigravity-proxy-patch --status     # report current state
-crouter antigravity-proxy-patch --revert     # remove the patch
-crouter antigravity-proxy-patch --proxy-dir <path>   # if the proxy lives elsewhere
-```
-
-`./install.sh` runs the patcher automatically when it finds the proxy checkout next to itself, so a fresh `git clone antigravity-claude-proxy && ./install.sh` configures GPT-OSS end-to-end. See `docs/upstream-pr/PR.md` for the format-patch and PR body to send upstream.
-
-Do not switch between Gemini and Claude models inside one session — their thinking signatures are incompatible. Start a new session with the matching provider instead.
-
-The Antigravity proxy is an unofficial integration. Do not use it with a primary Google account, sensitive source code, or production credentials.
-
-### Ollama (local / cloud open-weight models)
-
-Ollama exposes the Anthropic Messages API natively on `http://localhost:11434`, so Claude Code talks to it with **no translation proxy and no API key**. The provider retains dummy, non-empty Anthropic credentials because Claude Code requires them; Ollama ignores their values. `PRE_START` verifies that the Ollama service is running, and `HEALTH_CHECK_URL` lets `doctor` check it.
-
-One-time setup:
-
-```sh
-ollama pull glm-4.7-flash            # repository default
-```
-
-The repository default must be available through your Ollama installation. A positional model ID or `--model` overrides only the primary model for that session; the opus, sonnet, haiku, and subagent mappings remain at the provider defaults.
-
-```sh
-crouter ollama                       # use the repository default
-crouter ollama qwen3.5:2b            # override the primary model only
-crouter ollama --model qwen3-coder   # equivalent explicit form
-```
-
-| Claude Code selection | Ollama model |
-| --- | --- |
-| Primary model | `glm-4.7-flash`, or the positional/`--model` session override |
-| Opus / sonnet / haiku / subagents | `glm-4.7-flash`; primary-model overrides do not change these mappings |
-
-There is no one-shot CLI option to override every tier mapping for a session. Persistent customization requires changing the model mappings in `providers/ollama.sh`.
-
-The provider's `CONTEXT_TOKENS=65536` configures Claude Code's client-side context limit. Ollama must separately allocate enough context for the selected model and hardware; configure `OLLAMA_CONTEXT_LENGTH` for the server or `num_ctx` for the model. Coding and agent workloads should use at least 64K when resources allow. Optional `EFFORT` (for example, `medium`) is available for thinking-capable models; leave it empty otherwise.
-
-### DashScope (Alibaba Cloud Model Studio / Qwen)
-
-Native Anthropic-compatible Messages API endpoint — **no proxy required**. Alibaba Cloud's DashScope platform exposes `/v1/messages` at `https://dashscope.aliyuncs.com/compatible-mode/v1/messages` with Bearer token auth. Models include Qwen 2.5 / 3 series (Max/Plus/Turbo/Long). Context: 32K for Max/Plus/Turbo, 10M for Qwen-Long.
-
-```sh
-# Store API key in Keychain (service name: dashscope-api-key)
-read -s "DASHSCOPE_KEY?Paste DashScope API key: "; echo
-security add-generic-password -U -a "$USER" -s "dashscope-api-key" -w "$DASHSCOPE_KEY"
-unset DASHSCOPE_KEY
-
-crouter dashscope
-```
-
-| Claude Code selection | Qwen model |
-| --- | --- |
-| Default, `/model sonnet`, subagents | `qwen-plus` |
-| `/model opus` | `qwen-max` |
-| `/model haiku` | `qwen-turbo` |
-
-Reasoning effort defaults to `medium` (Qwen3 models support native thinking).
-
-### Vertex AI (Google Cloud)
-
-Vertex AI does not natively speak the Anthropic Messages API. We front it with the **vertex2anthropic** proxy (https://github.com/stackia/vertex2anthropic) which converts Anthropic `/v1/messages` → Vertex AI `rawPredict`/`streamRawPredict`. Auth uses Google Cloud ADC (`gcloud auth application-default login`).
-
-```sh
-# One-time: clone the proxy
-git clone https://github.com/stackia/vertex2anthropic ~/.local/share/vertex2anthropic
-# Or set VERTEX_PROXY_DIR in config.sh to your clone location
-
-# Authenticate with Google Cloud
-gcloud auth application-default login
-# Optionally set default region:
-gcloud config set ai/region us-central1
-
+ANTHROPIC_VERTEX_PROJECT_ID=my-project \
+CLOUD_ML_REGION=us-east5 \
 crouter vertex
 ```
 
-| Claude Code selection | Vertex AI model |
-| --- | --- |
-| Default, `/model sonnet`, subagents | `claude-3-5-sonnet-v2@20241022` |
-| `/model opus` | `claude-3-opus@20241022` |
-| `/model haiku` | `claude-3-5-haiku@20241022` |
+Only provider-declared AWS/Google credential variables survive the launcher's
+isolated `env -i` environment.
 
-Reasoning effort defaults to `max`. The proxy auto-starts on `PRE_START` and shuts down on `POST_STOP`.
+## Antigravity and local providers
 
-### AWS Bedrock
+Antigravity requires a checkout of
+[`antigravity-claude-proxy`](https://github.com/badrisnarayanan/antigravity-claude-proxy).
+Set `ANTIGRAVITY_PROXY_DIR` and optionally `ANTIGRAVITY_PORT` in `config.sh`.
+crouter starts it only when needed and stops it only if that same session owns
+the process; a proxy that was already running is left untouched.
 
-AWS Bedrock uses its own Converse API. We front it with a local **bedrock-proxy** (https://github.com/jparkerweb/bedrock-proxy-endpoint) which converts Anthropic `/v1/messages` → Bedrock `Converse`/`ConverseStream`. Auth uses standard AWS credential chain (`aws configure`, IAM role, env vars).
+Ollama exposes its native Anthropic compatibility endpoint at
+`http://localhost:11434`. Pull the configured default or select an installed
+model explicitly:
 
 ```sh
-# One-time: clone the proxy
-git clone https://github.com/jparkerweb/bedrock-proxy-endpoint ~/.local/share/bedrock-proxy
-# Or set BEDROCK_PROXY_DIR in config.sh to your clone location
-
-# Authenticate with AWS
-aws configure  # or set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
-aws configure set region us-east-1
-
-crouter bedrock
+ollama pull glm-4.7-flash
+crouter ollama
+crouter ollama qwen3.5:2b
 ```
 
-| Claude Code selection | Bedrock model |
-| --- | --- |
-| Default, `/model sonnet`, subagents | `anthropic.claude-3-5-sonnet-20241022-v2:0` |
-| `/model opus` | `anthropic.claude-3-opus-20240229-v1:0` |
-| `/model haiku` | `anthropic.claude-3-5-haiku-20241022-v1:0` |
+Codex requires `icebear0828/codex-proxy` on port 19000 and a completed ChatGPT
+OAuth PKCE login. Its available catalog remains account-dependent.
 
-Reasoning effort defaults to `max`. The proxy auto-starts on `PRE_START` and shuts down on `POST_STOP`.
+## Adding a provider
 
-## What to commit
+For a provider with distinct billing surfaces:
 
-| Content | Commit? |
-| --- | --- |
-| Launcher framework, provider examples, README | Yes |
-| `config.example.sh` | Yes |
-| Your real `config.sh` | No (gitignored) |
-| Keychain item names, env var names | OK |
-| API keys, Google account data, logs, account files | Never |
+```sh
+PROVIDER_NAME="example"
+PROVIDER_DESC="Example Token Plan and API"
 
-## Troubleshooting
+BASE_URL="https://plan.example/anthropic"
+MODEL="plan-main"
+MODEL_OPUS="plan-opus"
+MODEL_HAIKU="plan-fast"
 
-- `crouter doctor` checks the Claude binary, config, curl/keychain availability, per-provider auth, and gateway health.
-- Antigravity gateway logs: `logs/antigravity-proxy.log`.
-- MiniMax 401: confirm the Keychain item holds a China Token Plan key.
-- If an Antigravity Claude model is quota-limited, use `antigravity` until it resets.
+AUTH_MODE="surfaces"
 
-## Version & autocompletion
+PLAN_URL="https://plan.example/anthropic"
+PLAN_AUTH_TYPE="bearer"
+PLAN_KEY_ENV="EXAMPLE_PLAN_KEY"
+PLAN_KEYS="example-plan"
+PLAN_MODEL="plan-main"
+PLAN_MODEL_OPUS="plan-opus"
+PLAN_MODEL_HAIKU="plan-fast"
 
-- Version is tracked in the `VERSION` file. `crouter --version` prints it.
-- Shell autocompletion: source `completions/crouter.bash` (bash) or `completions/crouter.zsh` (zsh) from your shell rc.
+API_URL="https://api.example/anthropic"
+API_AUTH_TYPE="x-api-key"
+API_KEY_ENV="EXAMPLE_API_KEY"
+API_KEYS="example-api"
+API_MODEL="api-main"
+API_MODEL_OPUS="api-large"
+API_MODEL_HAIKU="api-fast"
+```
+
+`BASE_URL` must be the prefix Claude Code can append `/v1/messages` to. Do not
+put the full messages path in a provider definition. Leave uncertain context
+limits empty instead of guessing. Add an offline contract assertion to
+`test/provider-matrix.sh` and record primary sources in the audit document.
+
+## Security
+
+- Real `config.sh`, credentials, logs, and provider account data are ignored.
+- Secrets are never printed by `list`, `doctor`, `provider show`, or key-list
+  commands.
+- `crouter add` reads a key from `/dev/tty` with echo disabled and stores it in
+  macOS Keychain.
+- Local proxies bind only to `127.0.0.1` and are reaped with the session.
+- Local proxies require random per-session client tokens, so a fixed gateway
+  port does not expose loaded provider credentials to other local processes.
+- `BYPASS_PERMISSIONS=1` is available but unsafe on untrusted repositories.
 
 ## Development
 
-- `sh test/smoke.sh` runs a minimal offline smoke test (no keychain or network required).
-- On push/PR, GitHub Actions runs `shellcheck` on all scripts and the smoke test.
+```sh
+sh test/smoke.sh
+for test_file in test/*.sh; do sh "$test_file"; done
+sh -n bin/crouter lib/*.sh providers/*.sh test/*.sh
+git diff --check
+```
+
+Version is read from `VERSION`. Bash and zsh completions are under
+`completions/`.

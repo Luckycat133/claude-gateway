@@ -5,7 +5,7 @@ PROVIDER_DESC="Anthropic Claude (subscription OAuth preferred, API key fallback)
 
 BASE_URL="https://api.anthropic.com"
 MODEL="claude-sonnet-5"
-CONTEXT_TOKENS="200000"
+CONTEXT_TOKENS="1048576"
 
 MODEL_OPUS="claude-opus-5"
 MODEL_SONNET="claude-sonnet-5"

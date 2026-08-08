@@ -9,26 +9,28 @@
 //
 // Route model (v2: candidates)
 //   A route has one or more `candidates`. Each candidate is a complete auth
-//   surface: its own `url` and `auth` ({type, token}) plus optional
-//   `extra_env` (header K=V pairs). The gateway tries candidates in order and
-//   fails over to the next one on HTTP 401/429. This is what makes
+//   surface: its own `url`, `auth` ({type, token}), and optional model map. The
+//   gateway tries candidates in order and
+//   fails over to the next one on HTTP 401/402/403/429. This is what makes
 //   "preferred account first, API key fallback" work at request granularity:
 //   e.g. Anthropic's route has candidate[0] = subscription OAuth (Bearer) and
 //   candidate[1] = API key (x-api-key). Keypool providers simply list every
-//   key as its own candidate, so 429 rotation is the same mechanism.
+//   key as its own candidate, so quota rotation uses the same mechanism.
 //
 // Env contract:
 //   CROUTER_ROUTES_FILE  path to a JSON file: an array of route objects
 //   CROUTER_GATEWAY_PORT port to listen on (default 18799)
-//   CROUTER_GATEWAY_TOKEN token Claude Code must send (accepted if non-empty;
-//                         default "crouter"). The gateway is local-only.
+//   CROUTER_GATEWAY_TOKEN token Claude Code must send on /v1/messages
+//                         (default "crouter" for standalone compatibility).
+//                         crouter generates a random token per session.
 //
 // Route object:
 //   { "prefix": "anthropic",
 //     "base_url": "https://api.anthropic.com",
 //     "candidates": [
-//       { "url": "...", "auth": {"type":"bearer","token":"<oauth>"}, "extra_env": [] },
-//       { "url": "...", "auth": {"type":"x-api-key","token":"<key>"}, "extra_env": [] }
+//       { "url": "...", "auth": {"type":"bearer","token":"<oauth>"} },
+//       { "url": "...", "auth": {"type":"x-api-key","token":"<key>"},
+//         "model_map": {"logical model":"surface model"} }
 //     ],
 //     "models": ["claude-sonnet-4", ...] }
 
@@ -63,6 +65,20 @@ const PORT = parseInt(process.env.CROUTER_GATEWAY_PORT || '18799', 10);
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) fail('CROUTER_GATEWAY_PORT invalid');
 const GATEWAY_TOKEN = process.env.CROUTER_GATEWAY_TOKEN || 'crouter';
 
+function requestToken(req) {
+  const authorization = String(req.headers.authorization || '');
+  if (authorization.slice(0, 7).toLowerCase() === 'bearer ') return authorization.slice(7);
+  return String(req.headers['x-api-key'] || req.headers['anthropic-auth-token'] || '');
+}
+
+function rejectUnauthorized(res) {
+  res.writeHead(401, {
+    'content-type': 'application/json',
+    'www-authenticate': 'Bearer realm="crouter-gateway"',
+  });
+  res.end(JSON.stringify({error: {type: 'authentication_error', message: 'invalid local gateway token'}}));
+}
+
 // Pre-parse each candidate's target.
 for (const r of ROUTES) {
   if (!Array.isArray(r.candidates) || r.candidates.length === 0) {
@@ -92,34 +108,41 @@ function log(msg) {
   process.stderr.write('crouter-gateway: ' + msg + '\n');
 }
 
+function candidateModel(cand, requested) {
+  if (
+    cand.model_map &&
+    typeof cand.model_map === 'object' &&
+    Object.prototype.hasOwnProperty.call(cand.model_map, requested)
+  ) {
+    return cand.model_map[requested];
+  }
+  // Compatibility with route files emitted before per-tier maps existed.
+  return cand.model || requested;
+}
+
 // ---- header construction per candidate -----------------------------------
 function buildHeaders(cand, clientReq) {
   const headers = {};
   for (const [h, v] of Object.entries(clientReq.headers)) {
     const lh = h.toLowerCase();
     if (lh === 'host' || lh === 'connection' || lh === 'proxy-connection') continue;
-    if (lh === 'authorization' || lh === 'x-api-key') continue; // gateway sets auth
+    if (lh === 'authorization' || lh === 'x-api-key' || lh === 'anthropic-auth-token') continue;
     headers[h] = v;
   }
   const a = cand.auth;
   if (a.type === 'none') {
-    // Ollama-style: a dummy token (value ignored by backend) + optional extra_env.
-    // Never send an empty credential header — some servers drop empty values.
+    // Ollama's Claude Code integration uses ANTHROPIC_AUTH_TOKEN, which the
+    // Anthropic client sends as a Bearer token. Keep that documented shape and
+    // do not invent an x-api-key header.
     const tok = a.token || 'crouter';
-    headers['anthropic-auth-token'] = tok;
-    headers['x-api-key'] = tok;
-    for (const kv of cand.extra_env || []) {
-      const i = kv.indexOf('=');
-      if (i < 0) continue;
-      const h = kv.slice(0, i);
-      const lh = h.toLowerCase();
-      if (lh === 'host' || lh === 'connection' || lh === 'content-length' || lh === 'transfer-encoding') continue;
-      headers[h] = kv.slice(i + 1);
-    }
+    headers['authorization'] = 'Bearer ' + tok;
   } else if (a.type === 'x-api-key') {
     headers['x-api-key'] = a.token;
   } else if (a.type === 'bearer') {
     headers['authorization'] = 'Bearer ' + a.token;
+  } else if (a.type === 'both') {
+    headers['authorization'] = 'Bearer ' + a.token;
+    headers['x-api-key'] = a.token;
   }
   // Body is rewritten (model prefix stripped); drop content-length and let Node recompute.
   delete headers['content-length'];
@@ -184,11 +207,7 @@ function handleMessage(clientReq, clientRes) {
       );
       return;
     }
-    // Rewrite the model to the backend's bare name, then forward.
-    parsed.model = realModel;
-    const newBody = Buffer.from(JSON.stringify(parsed), 'utf8');
-
-    // Try candidates in order; fail over on 401/429 or upstream error.
+    // Try candidates in order; fail over on auth/quota errors or upstream error.
     function tryCand(idx) {
       if (idx >= route.candidates.length) {
         if (!clientRes.headersSent) {
@@ -202,6 +221,10 @@ function handleMessage(clientReq, clientRes) {
         return;
       }
       const cand = route.candidates[idx];
+      // A surface may expose a provider-specific model for the same logical
+      // route (for example a plan router versus a pay-as-you-go model ID).
+      parsed.model = candidateModel(cand, realModel);
+      const newBody = Buffer.from(JSON.stringify(parsed), 'utf8');
       const headers = buildHeaders(cand, clientReq);
       const path = cand._pathBase + (clientReq.url || '/');
       const options = {
@@ -214,7 +237,9 @@ function handleMessage(clientReq, clientRes) {
       };
       const transport = cand._proto === 'https:' ? https : http;
       const up = transport.request(options, (upRes) => {
-        const transient = upRes.statusCode === 401 || upRes.statusCode === 429;
+        const transient =
+          upRes.statusCode === 401 || upRes.statusCode === 402 ||
+          upRes.statusCode === 403 || upRes.statusCode === 429;
         if (transient && idx + 1 < route.candidates.length) {
           log('candidate ' + idx + ' on ' + prefix + ' got ' + upRes.statusCode + ' -> failing over');
           upRes.resume(); // drain, do not pipe
@@ -249,6 +274,11 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (req.method === 'POST' && req.url.split('?')[0] === '/v1/messages') {
+    if (requestToken(req) !== GATEWAY_TOKEN) {
+      req.resume();
+      rejectUnauthorized(res);
+      return;
+    }
     handleMessage(req, res);
     return;
   }

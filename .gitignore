@@ -16,3 +16,8 @@ skills/
 skills-lock.json
 TASKS-*.md
 REFACTOR-PROMPT.md
+
+# Session-scoped provider plugins are release assets, including their hidden
+# manifests and nested skill directories.
+!assets/
+!assets/**

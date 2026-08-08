@@ -11,7 +11,7 @@ CONTEXT_TOKENS="65536"
 # Ollama ignores these dummy credentials, but Claude Code requires non-empty values.
 AUTH_MODE="none"
 EXTRA_ENV="ANTHROPIC_AUTH_TOKEN=ollama
-ANTHROPIC_API_KEY=ollama"
+ANTHROPIC_API_KEY="
 
 PRE_START='curl -fsS --max-time 3 http://localhost:11434 >/dev/null 2>&1 || die "Ollama not reachable at http://localhost:11434 — start it (ollama serve) and pull a model first"'
 

@@ -4,6 +4,50 @@ All notable changes to this local setup are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-08
+
+### Added
+
+- Explicit Token Plan/API key surfaces with per-credential URL, auth header,
+  key pool, and tier-model maps; direct and unified routes fail over on
+  401/402/403/429 without cross-combining credentials and endpoints.
+- Audited domestic providers for Alibaba Model Studio (including Coding Plan),
+  Tencent Cloud (including Coding Plan), Baidu Qianfan (personal/team Token
+  Plans plus legacy Coding Plan), Huawei ModelArts MaaS, Xiaomi MiMo,
+  SiliconFlow, Qiniu AI (enterprise subscription plus API), 302.AI, AIHubMix,
+  InfiniAI GenStudio, and PPIO.
+- Session-scoped provider MCP/skill profiles for MiniMax, Z.AI, DashScope,
+  StepFun, Volcengine, optional Tencent WebSearch, and console-issued Qiniu
+  MCP services, plus the official AIHubMix API and PPIO OAuth MCPs. Managed
+  profiles use strict MCP isolation and never mutate global Claude
+  configuration.
+- Offline provider-matrix, surface routing, model-map, native backend, asset,
+  lifecycle, and ownership regression tests plus a dated primary-source audit.
+
+### Changed
+
+- MiniMax, Kimi Code, Z.AI, DashScope, DeepSeek, StepFun, and Volcengine now use
+  current vendor endpoints/models and the surface contract. MiniMax defaults to
+  M3, Kimi to K3 256K, Z.AI to GLM-5.2 1M, DashScope to stable Qwen 3.8 Max,
+  and StepFun to Step 3.7 Flash.
+- Qianfan now defaults to the current personal Token Plan, isolates the team
+  Token Plan as `qianfan-team`, and retains the retired Coding Plan only as
+  `qianfan-coding` for existing subscriptions.
+- Bedrock and Vertex use Claude Code's native cloud backends instead of local
+  third-party proxies and guessed model IDs.
+- Anthropic's default Sonnet context is configured at 1,048,576 tokens.
+- Antigravity cleanup stops only a gateway started by the current session.
+- Local gateway and keypool requests use random per-session client tokens; retry
+  budgets reset per request, while HTTP 402 quota exhaustion and HTTP 403
+  entitlement rejection trigger failover.
+- `crouter all` consumes explicit surface candidates and skips native backends;
+  provider MCPs/skills remain a direct-session feature.
+
+### Removed
+
+- Invalid OpenAI and Baichuan providers and the stale `claude-openai` launcher;
+  neither vendor documents a directly usable Anthropic Messages base URL.
+
 ## [0.4.17] - 2026-08-08
 
 Antigravity lineup refresh + key-mgmt rework + several smaller cleanups

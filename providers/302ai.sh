@@ -1,0 +1,30 @@
+#!/bin/sh
+# 302.AI's original Messages API preserves the selected Anthropic model.
+PROVIDER_NAME="302ai"
+PROVIDER_DESC="302.AI Anthropic Messages API"
+
+BASE_URL="https://api.302.ai"
+MODEL="claude-sonnet-5"
+CONTEXT_TOKENS="1000000"
+MODEL_OPUS="claude-opus-5"
+MODEL_SONNET="claude-sonnet-5"
+MODEL_HAIKU="claude-haiku-4-5-20251001"
+MODEL_SUBAGENT="claude-haiku-4-5-20251001"
+MODEL_ALIASES="claude-fable-5"
+EFFORT="high"
+
+AUTH_MODE="surfaces"
+API_URL="https://api.302.ai"
+API_AUTH_TYPE="x-api-key"
+API_KEY_ENV="AI302_API_KEY"
+API_KEYS="302ai-api-key"
+API_MODEL="claude-sonnet-5"
+API_MODEL_OPUS="claude-opus-5"
+API_MODEL_SONNET="claude-sonnet-5"
+API_MODEL_HAIKU="claude-haiku-4-5-20251001"
+API_MODEL_SUBAGENT="claude-haiku-4-5-20251001"
+
+EXTRA_ENV="CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
+PRE_START=""
+POST_STOP=""
+HEALTH_CHECK_URL=""

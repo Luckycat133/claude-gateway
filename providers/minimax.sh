@@ -1,28 +1,35 @@
 #!/bin/sh
-# Provider: MiniMax M3 (China Anthropic-compatible endpoint).
+# MiniMax Token Plan and pay-as-you-go keys use distinct credential surfaces.
 PROVIDER_NAME="minimax"
-PROVIDER_DESC="MiniMax M3 via the China Anthropic-compatible endpoint"
+PROVIDER_DESC="MiniMax M3 (Token Plan and API key failover)"
 
 BASE_URL="https://api.minimaxi.com/anthropic"
 MODEL="MiniMax-M3"
 CONTEXT_TOKENS="1048576"
-
 MODEL_OPUS="MiniMax-M3"
 MODEL_SONNET="MiniMax-M3"
 MODEL_HAIKU="MiniMax-M3"
 MODEL_SUBAGENT="MiniMax-M3"
-
-# MiniMax M3 supports adaptive thinking.
 EFFORT="max"
 
-AUTH_MODE="keypool"
-AUTH_KEYS="codex-minimax-token-plan"
+AUTH_MODE="surfaces"
+PLAN_URL="https://api.minimaxi.com/anthropic"
+PLAN_AUTH_TYPE="bearer"
+PLAN_KEY_ENV="MINIMAX_TOKEN_PLAN_KEY"
+PLAN_KEYS="codex-minimax-token-plan"
+PLAN_MODEL="MiniMax-M3"
 
+API_URL="https://api.minimaxi.com/anthropic"
+API_AUTH_TYPE="bearer"
+API_KEY_ENV="MINIMAX_API_KEY"
+API_KEYS="minimax-api-key"
+API_MODEL="MiniMax-M3"
+
+ASSET_PROFILE="minimax"
+ASSET_PLAN_PLUGIN_DIRS="$ROOT_DIR/assets/plugins/minimax-token-plan"
 EXTRA_ENV="API_TIMEOUT_MS=3000000
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
 
-# Configure MiniMax MCP servers and the multimodal skill when credentials are
-# available. Controlled by MINIMAX_AUTO_MCP; see bin/minimax-mcp-autosetup.
-PRE_START="$ROOT_DIR/bin/minimax-mcp-autosetup"
+PRE_START=""
 POST_STOP=""
 HEALTH_CHECK_URL=""

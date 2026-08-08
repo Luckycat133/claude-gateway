@@ -1,16 +1,29 @@
 #!/bin/sh
-# Key management for keypool providers. Edits a provider's AUTH_KEYS / PLUS_KEYS
-# lines in providers/<name>.sh and stores/updates the secret in macOS Keychain.
+# Key management for pooled providers. Explicit surface providers edit
+# PLAN_KEYS/API_KEYS; legacy keypools retain AUTH_KEYS/PLUS_KEYS.
 # Never prints the secret value.
 # Depends on: provider.sh (provider_file, load_provider).
 
 # _surface_var <name>   ->  variable name holding the keys for that surface.
-# Supported: "main" -> AUTH_KEYS, "plus" -> PLUS_KEYS.
+# Public surfaces are plan/api. main/plus remain compatibility aliases.
 _surface_var() {
   case $1 in
-    main)    printf 'AUTH_KEYS' ;;
-    plus)  printf 'PLUS_KEYS' ;;
-    *) die "unknown surface '$1' (expected: main or plus)" ;;
+    plan|token-plan) printf 'PLAN_KEYS' ;;
+    api|api-key)     printf 'API_KEYS' ;;
+    main)
+      if [ "${AUTH_MODE:-}" = surfaces ]; then printf 'API_KEYS'; else printf 'AUTH_KEYS'; fi
+      ;;
+    plus)
+      if [ "${AUTH_MODE:-}" = surfaces ]; then printf 'PLAN_KEYS'; else printf 'PLUS_KEYS'; fi
+      ;;
+    *) die "unknown surface '$1' (expected: plan or api)" ;;
+  esac
+}
+
+_validate_service_name() {
+  case $1 in
+    ''|.|..|*[!A-Za-z0-9._:@+-]*)
+      die "invalid Keychain service name '$1' (use letters, digits, dot, underscore, colon, at, plus, or hyphen)" ;;
   esac
 }
 
@@ -98,19 +111,23 @@ cmd_add_key() {
   _p=$1; shift
   load_provider "$_p"
 
-  # keypool: multiple keys per surface, rich --surface/--name flags.
-  if [ "${AUTH_MODE:-}" = "keypool" ]; then
-    _surface=main
+  # Pooled providers: multiple keys per surface, rich --surface/--name flags.
+  if [ "${AUTH_MODE:-}" = "keypool" ] || [ "${AUTH_MODE:-}" = surfaces ]; then
+    if [ "${AUTH_MODE:-}" = surfaces ]; then
+      if [ -n "${PLAN_URL:-}" ]; then _surface=plan; else _surface=api; fi
+    else
+      _surface=main
+    fi
     _name=
     while [ $# -gt 0 ]; do
       case $1 in
-        --surface) [ $# -ge 2 ] || die "add: --surface needs an argument (main|plus)"
+        --surface) [ $# -ge 2 ] || die "add: --surface needs an argument (plan|api)"
                    _surface=$2; shift 2 ;;
         --surface=*) _surface=${1#--surface=}; shift ;;
         --name)   [ $# -ge 2 ] || die "add: --name needs an argument (keychain service name)"
                   _name=$2; shift 2 ;;
         --name=*) _name=${1#--name=}; shift ;;
-        -h|--help) info "usage: crouter add <provider> [--surface main|plus] [--name <service>]"; return 0 ;;
+        -h|--help) info "usage: crouter add <provider> [--surface plan|api] [--name <service>]"; return 0 ;;
         *) die "add: unknown argument '$1'" ;;
       esac
     done
@@ -118,10 +135,18 @@ cmd_add_key() {
     _var=$(_surface_var "$_surface")
     _file=$(provider_file "$_p")
 
+    if [ "${AUTH_MODE:-}" = surfaces ]; then
+      case $_var in
+        PLAN_KEYS) [ -n "${PLAN_URL:-}" ] || die "provider '$_p' has no Token Plan surface" ;;
+        API_KEYS)  [ -n "${API_URL:-}" ] || die "provider '$_p' has no pay-as-you-go API surface" ;;
+      esac
+    fi
+
     # Pick the next service name if the user didn't provide one.
     if [ -z "$_name" ]; then
-      _name=$(_next_key_name "$_p" "$_surface")
+      _name=$(_next_key_name "$_p-$_surface")
     fi
+    _validate_service_name "$_name"
 
     # Reject duplicates that are already listed in this surface.
     _existing=$(_read_kv "$_file" "$_var")
@@ -137,7 +162,7 @@ cmd_add_key() {
     _keychain_put "$_name" "$_secret"
     unset _secret
 
-    # Append to AUTH_KEYS / PLUS_KEYS in providers/<provider>.sh.
+    # Append to the selected surface declaration in providers/<provider>.sh.
     if [ -z "$_existing" ]; then
       _new="$_name"
     else
@@ -178,24 +203,29 @@ cmd_remove_key() {
   _p=$1; shift
   load_provider "$_p"
 
-  if [ "${AUTH_MODE:-}" = "keypool" ]; then
-    _surface=main
+  if [ "${AUTH_MODE:-}" = "keypool" ] || [ "${AUTH_MODE:-}" = surfaces ]; then
+    if [ "${AUTH_MODE:-}" = surfaces ]; then
+      if [ -n "${PLAN_URL:-}" ]; then _surface=plan; else _surface=api; fi
+    else
+      _surface=main
+    fi
     _name=
     _yes=0
     while [ $# -gt 0 ]; do
       case $1 in
-        --surface) [ $# -ge 2 ] || die "remove: --surface needs an argument (main|plus)"
+        --surface) [ $# -ge 2 ] || die "remove: --surface needs an argument (plan|api)"
                    _surface=$2; shift 2 ;;
         --surface=*) _surface=${1#--surface=}; shift ;;
         --name)   [ $# -ge 2 ] || die "remove: --name needs an argument"
                   _name=$2; shift 2 ;;
         --name=*) _name=${1#--name=}; shift ;;
         -y|--yes) _yes=1; shift ;;
-        -h|--help) info "usage: crouter remove <provider> --name <service> [--surface main|plus] [-y]"; return 0 ;;
+        -h|--help) info "usage: crouter remove <provider> --name <service> [--surface plan|api] [-y]"; return 0 ;;
         *) die "remove: unknown argument '$1'" ;;
       esac
     done
     [ -n "$_name" ] || die "remove: --name is required (the keychain service name to remove)"
+    _validate_service_name "$_name"
 
     _var=$(_surface_var "$_surface")
     _file=$(provider_file "$_p")
@@ -297,8 +327,9 @@ cmd_list_keys_one() {
   fi
 
   case "${AUTH_MODE:-}" in
-    keypool)
-      for _surface in main plus; do
+    keypool|surfaces)
+      if [ "${AUTH_MODE:-}" = surfaces ]; then _surfaces="plan api"; else _surfaces="main plus"; fi
+      for _surface in $_surfaces; do
         _var=$(_surface_var "$_surface")
         _existing=$(_read_kv "$_file" "$_var")
         [ -z "$_existing" ] && continue
@@ -312,6 +343,12 @@ cmd_list_keys_one() {
           printf '  - %-40s %s\n' "$_w" "$_st"
         done
       done
+      if [ "${AUTH_MODE:-}" = surfaces ]; then
+        [ -n "${PLAN_KEY_ENV:-}" ] && printf '  - plan env:%s %s\n' "$PLAN_KEY_ENV" \
+          "$([ -n "$(printenv "$PLAN_KEY_ENV" 2>/dev/null)" ] && printf set || printf unset)"
+        [ -n "${API_KEY_ENV:-}" ] && printf '  - api env:%s %s\n' "$API_KEY_ENV" \
+          "$([ -n "$(printenv "$API_KEY_ENV" 2>/dev/null)" ] && printf set || printf unset)"
+      fi
       ;;
     keychain)
       _ref=${AUTH_REFERENCE:-}
@@ -342,6 +379,9 @@ cmd_list_keys_one() {
       ;;
     none)
       printf '  - (no key — local proxy supplies auth)\n'
+      ;;
+    native)
+      printf '  - (native cloud credential chain; no crouter key)\n'
       ;;
     *)
       printf '  - (unsupported AUTH_MODE: %s)\n' "${AUTH_MODE:-}"

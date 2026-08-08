@@ -35,7 +35,7 @@ ok()  { printf 'ok    %s\n' "$1"; }
 bad() { printf 'FAIL  %s\n' "$1"; fail=1; }
 
 # Legacy command names remain available as local compatibility launchers.
-for legacy in claude-minimax claude-antigravity claude-antigravity-claude claude-anthropic claude-openai claude-openrouter; do
+for legacy in claude-minimax claude-antigravity claude-antigravity-claude claude-anthropic claude-openrouter; do
   _out=$("$ROOT_DIR/bin/$legacy" --version 2>&1)
   _rc=$?
   if [ "$_rc" -eq 0 ] && printf '%s\n' "$_out" | grep -qE '[0-9]+\.[0-9]+\.[0-9]+'; then
@@ -300,9 +300,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Providers with explicit AUTH mode assertions (anthropic / openai / openrouter / codex)
+# Providers with explicit auth-surface assertions.
 # ---------------------------------------------------------------------------
-for _dp in anthropic openai openrouter codex; do
+for _dp in anthropic openrouter codex 302ai aihubmix infini minimax dashscope moonshot ppio z-ai siliconflow stepfun volcengine tencent qianfan qianfan-team qianfan-coding qiniu huawei xiaomi; do
   if "$GATEWAY" list 2>/dev/null | grep -q "^$_dp "; then
     ok "$_dp provider is listed"
   else
@@ -310,9 +310,16 @@ for _dp in anthropic openai openrouter codex; do
   fi
 done
 
-# anthropic declares both surfaces -> AUTH column reads "dual"; openai is
-# keychain-only now (official API only); openrouter declares a single API
-# surface; codex is none (icebear owns its auth).
+for _removed in openai baichuan; do
+  if "$GATEWAY" list 2>/dev/null | grep -q "^$_removed "; then
+    bad "invalid $_removed provider is still listed"
+  else
+    ok "$_removed is omitted without an official Anthropic Messages endpoint"
+  fi
+done
+
+# Anthropic has its own dual-source account contract; domestic providers use
+# explicit plan/API surface labels; local proxies keep their native auth mode.
 if "$GATEWAY" list 2>/dev/null | awk '$1=="anthropic"{print $(NF-1)}' | grep -q '^dual$'; then
   ok "anthropic reports dual-source auth"
 else
@@ -324,37 +331,26 @@ if "$GATEWAY" list 2>/dev/null | awk '$1=="openrouter"{print $(NF-1)}' | grep -q
 else
   bad "openrouter did not report single-surface auth"
 fi
-# openai is official-API-only now -> keychain auth, never "dual".
-if "$GATEWAY" list 2>/dev/null | awk '$1=="openai"{print $(NF-1)}' | grep -q '^keychain$'; then
-  ok "openai reports keychain auth"
+if "$GATEWAY" list 2>/dev/null | awk '$1=="minimax"{print $(NF-1)}' | grep -q '^plan+api$'; then
+  ok "minimax reports separate plan and API surfaces"
 else
-  bad "openai did not report keychain auth"
+  bad "minimax did not report plan+api auth"
 fi
-
-# The public provider view exposes the production model catalog and context
-# passed to Claude Code, so pin the verified API contract at that boundary.
-_openai_show=$("$GATEWAY" provider show openai 2>&1)
-if printf '%s\n' "$_openai_show" | grep -q '^endpoint:    https://api\.openai\.com$' &&
-   printf '%s\n' "$_openai_show" | grep -q '^default:     gpt-5\.6-terra$' &&
-   printf '%s\n' "$_openai_show" | grep -q '^context:     1050000 tokens$' &&
-   printf '%s\n' "$_openai_show" | grep -q '^  opus:      gpt-5\.6-sol$' &&
-   printf '%s\n' "$_openai_show" | grep -q '^  sonnet:    gpt-5\.6-terra$' &&
-   printf '%s\n' "$_openai_show" | grep -q '^  haiku:     gpt-5\.6-luna$' &&
-   printf '%s\n' "$_openai_show" | grep -q '^  subagent:  gpt-5\.6-luna$'; then
-  ok "openai exposes the endpoint prefix, production model catalog, and context"
+if "$GATEWAY" list 2>/dev/null | awk '$1=="moonshot"{print $(NF-1)}' | grep -q '^plan$'; then
+  ok "Kimi Code reports its membership-plan-only surface"
 else
-  bad "openai exposes an incorrect endpoint, model catalog, or context"
+  bad "Kimi Code did not report plan-only auth"
 fi
 
 _openrouter_show=$("$GATEWAY" provider show openrouter 2>&1)
 _openrouter_show_rc=$?
 if [ "$_openrouter_show_rc" -eq 0 ] &&
    printf '%s\n' "$_openrouter_show" | grep -q '^default:     openrouter/free$' &&
-   printf '%s\n' "$_openrouter_show" | grep -q '^context:     200000 tokens$' &&
+   printf '%s\n' "$_openrouter_show" | grep -q '^context:     <unset> tokens$' &&
    printf '%s\n' "$_openrouter_show" | grep -q '^effort:      high$'; then
-  ok "openrouter exposes the free router with its verified context"
+  ok "openrouter leaves the dynamic free-router context unset"
 else
-  bad "openrouter exposes an unverified default model or context"
+  bad "openrouter pins a context for a dynamic model router"
 fi
 
 _antigravity_show=$("$GATEWAY" provider show antigravity 2>&1)

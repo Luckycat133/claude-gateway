@@ -1,26 +1,43 @@
 #!/bin/sh
-# Provider: Alibaba Cloud Model Studio (DashScope) — Qwen via native
-# Anthropic-compatible Messages API. Official docs use -latest for current version.
+# Alibaba Model Studio Token Plan and pay-as-you-go Anthropic endpoints.
 PROVIDER_NAME="dashscope"
-PROVIDER_DESC="Alibaba Cloud Model Studio (DashScope) Qwen via native Anthropic-compatible Messages API"
+PROVIDER_DESC="Alibaba Model Studio Token Plan and pay-as-you-go API"
 
-BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1/messages"
-MODEL="qwen-plus-latest"
-CONTEXT_TOKENS="32768"
+BASE_URL="https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic"
+MODEL="qwen3.8-max"
+CONTEXT_TOKENS="983616"
+MODEL_OPUS="qwen3.8-max"
+MODEL_SONNET="qwen3.8-max"
+MODEL_HAIKU="qwen3.6-flash"
+MODEL_SUBAGENT="qwen3.7-max"
+MODEL_ALIASES="qwen3.7-plus glm-5.2 deepseek-v4-pro deepseek-v4-flash-0731"
+EFFORT="xhigh"
 
-MODEL_OPUS="qwen-max-latest"
-MODEL_SONNET="qwen-plus-latest"
-MODEL_HAIKU="qwen-turbo-latest"
-MODEL_SUBAGENT="qwen-turbo-latest"
+AUTH_MODE="surfaces"
+PLAN_URL="https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic"
+PLAN_AUTH_TYPE="bearer"
+PLAN_KEY_ENV="DASHSCOPE_TOKEN_PLAN_KEY"
+PLAN_KEYS="dashscope-token-plan"
+PLAN_MODEL="qwen3.8-max"
+PLAN_MODEL_OPUS="qwen3.8-max"
+PLAN_MODEL_SONNET="qwen3.8-max"
+PLAN_MODEL_HAIKU="qwen3.6-flash"
+PLAN_MODEL_SUBAGENT="qwen3.7-max"
 
-EFFORT="medium"
+# The legacy domain remains supported. A workspace-specific domain is the
+# current recommendation and can be supplied without editing this file.
+API_URL="${DASHSCOPE_API_URL:-https://dashscope.aliyuncs.com/apps/anthropic}"
+API_AUTH_TYPE="bearer"
+API_KEY_ENV="DASHSCOPE_API_KEY"
+API_KEYS="dashscope-api-key"
+API_MODEL="qwen3.7-max"
+API_MODEL_OPUS="qwen3.7-max"
+API_MODEL_SONNET="qwen3.7-max"
+API_MODEL_HAIKU="qwen3.6-flash"
+API_MODEL_SUBAGENT="qwen3.7-max"
 
-AUTH_MODE="keychain"
-AUTH_REFERENCE="dashscope-api-key"
-_AUTH_SCHEME="bearer"
-
+ASSET_PROFILE="dashscope"
 EXTRA_ENV="CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
-
 PRE_START=""
 POST_STOP=""
-HEALTH_CHECK_URL="https://dashscope.aliyuncs.com/compatible-mode/v1/models"
+HEALTH_CHECK_URL=""

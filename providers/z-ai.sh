@@ -1,37 +1,42 @@
 #!/bin/sh
-# Provider: Z.ai GLM — Anthropic-compatible endpoint with Coding Plan support.
-# Official: https://z.ai/ (GLM-5.2, GLM-5.1, GLM-4.7 for coding)
-# Coding Plan: subscription for AI coding (GLM-5.2/5-Turbo), via api.z.ai
-# Token Plan: pay-as-you-go via api.z.ai
-#
-# Endpoint: https://api.z.ai/v1/messages (Anthropic-compatible Messages API)
-# Auth: API key as Bearer token.
-# Coding Plan uses dedicated keys; Token Plan uses standard keys.
-# Both use keypool for automatic rotation on quota/auth errors.
+# Z.AI Coding Plan and API keys share the documented Anthropic endpoint.
 PROVIDER_NAME="z-ai"
-PROVIDER_DESC="Z.ai GLM (Coding Plan / Token Plan) via native Anthropic-compatible API"
+PROVIDER_DESC="Z.AI GLM Coding Plan and API"
 
-BASE_URL="https://api.z.ai/v1/messages"
-MODEL="glm-5.2"
-CONTEXT_TOKENS="200000"
+BASE_URL="https://api.z.ai/api/anthropic"
+MODEL="glm-5.2[1m]"
+CONTEXT_TOKENS="1000000"
+MODEL_OPUS="glm-5.2[1m]"
+MODEL_SONNET="glm-5.2[1m]"
+MODEL_HAIKU="glm-4.7"
+MODEL_SUBAGENT="glm-4.7"
+MODEL_ALIASES="glm-5.2 glm-5.1 glm-5 glm-5-turbo"
+EFFORT="high"
 
-# Map Claude Code tiers to GLM models.
-MODEL_OPUS="glm-5.2"
-MODEL_SONNET="glm-5.2"
-MODEL_HAIKU="glm-5-turbo"
-MODEL_SUBAGENT="glm-5-turbo"
+AUTH_MODE="surfaces"
+PLAN_URL="https://api.z.ai/api/anthropic"
+PLAN_AUTH_TYPE="bearer"
+PLAN_KEY_ENV="Z_AI_CODING_PLAN_KEY"
+PLAN_KEYS="z-ai-coding-plan"
+PLAN_MODEL="glm-5.2[1m]"
+PLAN_MODEL_OPUS="glm-5.2[1m]"
+PLAN_MODEL_SONNET="glm-5.2[1m]"
+PLAN_MODEL_HAIKU="glm-4.7"
+PLAN_MODEL_SUBAGENT="glm-4.7"
 
-EFFORT="max"
+API_URL="https://api.z.ai/api/anthropic"
+API_AUTH_TYPE="bearer"
+API_KEY_ENV="Z_AI_API_KEY"
+API_KEYS="z-ai-api-key"
+API_MODEL="glm-5.2[1m]"
+API_MODEL_OPUS="glm-5.2[1m]"
+API_MODEL_SONNET="glm-5.2[1m]"
+API_MODEL_HAIKU="glm-4.7"
+API_MODEL_SUBAGENT="glm-4.7"
 
-# Key pool: Coding Plan keys first (priority), then Token Plan keys.
-# Add service names to Keychain: z-ai-coding-1, z-ai-token-1, etc.
-AUTH_MODE="env"
-AUTH_REFERENCE="Z_AI_API_KEY"
-AUTH_KEYCHAIN_FALLBACK="z-ai-api-key"
-_AUTH_SCHEME="bearer"
-
-EXTRA_ENV="CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
-
+ASSET_PROFILE="zai"
+EXTRA_ENV="API_TIMEOUT_MS=3000000
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
 PRE_START=""
 POST_STOP=""
-HEALTH_CHECK_URL="https://api.z.ai/v1/models"
+HEALTH_CHECK_URL=""

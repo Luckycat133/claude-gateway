@@ -12,8 +12,17 @@ antigravity_gateway_running() {
 # PRE_START hook: start the local gateway if it is not already healthy.
 antigravity_ensure_gateway() {
   if antigravity_gateway_running; then
+    # Preserve ownership when this same crouter session already started it;
+    # otherwise a healthy process predates us and must be left alone.
+    if [ "${ANTIGRAVITY_GATEWAY_OWNED:-0}" != 1 ]; then
+      ANTIGRAVITY_GATEWAY_OWNED=0
+      ANTIGRAVITY_GATEWAY_PID=""
+    fi
     return 0
   fi
+
+  ANTIGRAVITY_GATEWAY_OWNED=0
+  ANTIGRAVITY_GATEWAY_PID=""
 
   _proxy_dir=${ANTIGRAVITY_PROXY_DIR:-$ROOT_DIR/antigravity-claude-proxy}
   [ -d "$_proxy_dir" ] || {
@@ -27,30 +36,48 @@ antigravity_ensure_gateway() {
   echo "Starting Antigravity gateway on 127.0.0.1:$(antigravity_port) ..."
   (
     cd "$_proxy_dir" || exit 1
-    nohup env HOST=127.0.0.1 PORT="$(antigravity_port)" npm start \
-      > "$_log_dir/antigravity-proxy.log" 2>&1 &
-  )
+    exec nohup env HOST=127.0.0.1 PORT="$(antigravity_port)" npm start
+  ) > "$_log_dir/antigravity-proxy.log" 2>&1 &
+  ANTIGRAVITY_GATEWAY_PID=$!
 
   _i=0
   while [ "$_i" -lt 30 ]; do
     if antigravity_gateway_running; then
+      if command -v lsof >/dev/null 2>&1; then
+        _listener_pid=$(lsof -t -a -iTCP:"$(antigravity_port)" -sTCP:LISTEN 2>/dev/null | head -n 1)
+        [ -n "$_listener_pid" ] && ANTIGRAVITY_GATEWAY_PID=$_listener_pid
+      fi
+      ANTIGRAVITY_GATEWAY_OWNED=1
       echo "Antigravity gateway is up."
       return 0
     fi
     sleep 0.5
     _i=$((_i + 1))
   done
+  kill "${ANTIGRAVITY_GATEWAY_PID:-}" 2>/dev/null || true
+  ANTIGRAVITY_GATEWAY_PID=""
   echo "Antigravity gateway did not become healthy; see $_log_dir/antigravity-proxy.log" >&2
   return 1
 }
 
 # POST_STOP hook: stop the node process listening on the gateway port.
 antigravity_stop_gateway() {
-  command -v lsof >/dev/null 2>&1 || { echo "lsof not found; cannot determine gateway PID." >&2; return 1; }
-  _pid=$(lsof -t -a -iTCP:"$(antigravity_port)" -sTCP:LISTEN -c node 2>/dev/null | head -n 1)
-  if [ -z "$_pid" ]; then
-    echo "Antigravity gateway is not running."
+  if [ "${ANTIGRAVITY_GATEWAY_OWNED:-0}" != 1 ]; then
     return 0
+  fi
+  _pid=${ANTIGRAVITY_GATEWAY_PID:-}
+  if [ -z "$_pid" ]; then
+    ANTIGRAVITY_GATEWAY_OWNED=0
+    return 0
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    _listener_pid=$(lsof -t -a -iTCP:"$(antigravity_port)" -sTCP:LISTEN 2>/dev/null | head -n 1)
+    if [ -n "$_listener_pid" ] && [ "$_listener_pid" != "$_pid" ]; then
+      echo "Antigravity gateway ownership changed; leaving PID $_listener_pid running." >&2
+      ANTIGRAVITY_GATEWAY_OWNED=0
+      ANTIGRAVITY_GATEWAY_PID=""
+      return 0
+    fi
   fi
   kill -TERM "$_pid" 2>/dev/null
   _i=0
@@ -64,4 +91,6 @@ antigravity_stop_gateway() {
   else
     echo "Stopped Antigravity gateway (PID $_pid)."
   fi
+  ANTIGRAVITY_GATEWAY_OWNED=0
+  ANTIGRAVITY_GATEWAY_PID=""
 }
